@@ -34,4 +34,4 @@ foreach ($configuredPath in @($config.projectPaths)) {
     }
     ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
 }
-
+& (Join-Path $PSScriptRoot 'Write-ActivityJournalHeartbeat.ps1') -JournalRoot $JournalRoot -Service 'project-evidence' -Status 'success' -ItemsProcessed 1 | Out-Null

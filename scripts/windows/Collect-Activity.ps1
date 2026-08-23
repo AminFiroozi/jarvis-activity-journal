@@ -63,4 +63,4 @@ $event = [ordered]@{
 }
 $outputPath = Join-Path $rawRoot ("activity-{0}.jsonl" -f $now.ToString('yyyy-MM-dd'))
 ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
-
+& (Join-Path $PSScriptRoot 'Write-ActivityJournalHeartbeat.ps1') -JournalRoot $JournalRoot -Service 'collector' -Status 'success' -ItemsProcessed 1 | Out-Null

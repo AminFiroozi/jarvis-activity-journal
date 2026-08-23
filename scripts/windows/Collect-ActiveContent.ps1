@@ -91,3 +91,4 @@ $event = [ordered]@{
     captureMode = 'Windows UI Automation; focused window only'
 }
 ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
+& (Join-Path $PSScriptRoot 'Write-ActivityJournalHeartbeat.ps1') -JournalRoot $JournalRoot -Service 'content-collector' -Status 'success' -ItemsProcessed 1 | Out-Null

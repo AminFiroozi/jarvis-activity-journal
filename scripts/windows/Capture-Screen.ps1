@@ -52,6 +52,7 @@ try {
     $parameters.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, [long]60)
     $bitmap.Save($path, $encoder, $parameters)
     Write-Output $path
+    & (Join-Path $PSScriptRoot 'Write-ActivityJournalHeartbeat.ps1') -JournalRoot $JournalRoot -Service 'screen-capture' -Status 'success' -ItemsProcessed 1 | Out-Null
 }
 finally {
     $graphics.Dispose()
