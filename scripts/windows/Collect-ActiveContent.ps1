@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -Raw -LiteralPath (Join-Path $JournalRoot 'config\settings.json') | ConvertFrom-Json
 if (-not $config.contentCapture.enabled) { exit 0 }
+if ($null -ne $config.privacy -and $config.privacy.captureEnabled -eq $false) { exit 0 }
 
 if (-not ('ActivityNative' -as [type])) {
     Add-Type @'
@@ -27,6 +28,13 @@ if ($config.contentCapture.allowedProcessNames -notcontains $process.ProcessName
 
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
 if ($null -eq $root) { exit 0 }
+$windowTitle = $root.Current.Name
+if ($null -ne $config.privacy) {
+    if (@($config.privacy.excludedApplications) -contains $process.ProcessName) { exit 0 }
+    foreach ($titlePattern in @($config.privacy.excludedWindowTitlePatterns)) {
+        if (-not [string]::IsNullOrWhiteSpace($titlePattern) -and $windowTitle -match $titlePattern) { exit 0 }
+    }
+}
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $parts = [System.Collections.Generic.List[string]]::new()
 $script:elementCount = 0
@@ -45,8 +53,10 @@ function Visit-Element {
             if ([string]::IsNullOrWhiteSpace($value)) { $value = $Element.Current.Name }
             if (-not [string]::IsNullOrWhiteSpace($value)) {
                 $clean = $value.Trim()
-                foreach ($redactPattern in @($config.contentCapture.redactTextPatterns)) {
-                    $clean = [regex]::Replace($clean, $redactPattern, '[REDACTED]')
+                if ($null -eq $config.privacy -or $config.privacy.redactBeforeStorage -ne $false) {
+                    foreach ($redactPattern in @($config.contentCapture.redactTextPatterns)) {
+                        $clean = [regex]::Replace($clean, $redactPattern, '[REDACTED]')
+                    }
                 }
                 if ($clean.Length -gt 2000) { $clean = $clean.Substring(0, 2000) + '…' }
                 if (-not $parts.Contains($clean)) { $parts.Add($clean); $script:elementCount++ }
@@ -79,5 +89,4 @@ $event = [ordered]@{
     captureMode = 'Windows UI Automation; focused window only'
 }
 ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
-
 
