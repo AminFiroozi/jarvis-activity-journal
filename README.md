@@ -2,6 +2,17 @@
 
 Local-first activity collection and journal generation for Windows. It captures structured activity metadata, optional focused-window text, and optional full-desktop screenshots. A configurable vision analyzer converts representative screenshots into structured activity events for an LLM-readable journal.
 
+## Architecture decision
+
+Use one local Qwen-VL model for both semantic stages:
+
+```text
+Screenshot → Qwen-VL → visual activity JSON
+All events → Qwen-VL → daily journal narrative
+```
+
+The model handles visual understanding and text synthesis. PowerShell handles collection, scheduling, redaction, JSONL storage, and Markdown output.
+
 ## Privacy model
 
 - Journal data is written outside this repository by default.
@@ -14,7 +25,7 @@ Do not use this on a corporate device or with other people's conversations witho
 
 ## Screenshot analysis
 
-The analyzer expects an OpenAI-compatible `POST /chat/completions` endpoint that accepts image input. It works with local or remote providers.
+The analyzer expects an OpenAI-compatible `POST /chat/completions` endpoint that accepts image input. It works with local or remote providers. The same endpoint/model can also be used for text-only journal synthesis.
 
 For a remote provider, set its API key environment variable before running the analyzer:
 
@@ -61,6 +72,8 @@ Get-Content Journal\llm-context\latest.md
 ```
 
 Successful screenshot analysis creates `Journal/raw/visual-YYYY-MM-DD.jsonl` entries and increases `Vision-analyzed screenshots` in `Journal/llm-context/latest.md`. HTTP 503 means the configured vision server is unavailable; check the server, model, endpoint, and `vision-service.log`.
+
+The journal-synthesis stage consumes the structured events and visual observations after screenshot analysis, then produces the daily narrative. Local model calls do not require an API key.
 
 ## Storage and privacy
 
