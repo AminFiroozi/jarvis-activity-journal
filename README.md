@@ -93,7 +93,7 @@ Set `OLLAMA_MODELS` or LM Studio's My Models directory to a drive with enough sp
 - `config/analyzer.example.json` — safe configuration template
 - `config/settings.example.json` — Windows collector configuration template
 - `scripts/Analyze-Screenshots.ps1` — Windows wrapper
-- `scripts/windows/` — collector, content capture, screen capture, scheduler, and journal scripts
+- `scripts/windows/` — collector, content capture, DPI-aware full-desktop screen capture, scheduler, and journal scripts
 - `scripts/windows/Start-VisionService.ps1` — hidden logon startup for the local vision server/model
 - `scripts/windows/Synthesize-Journal.ps1` — invokes the same model for daily narrative synthesis
 - `LICENSE` — MIT license
