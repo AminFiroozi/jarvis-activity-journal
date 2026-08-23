@@ -27,7 +27,7 @@
     "maxTextLength": 12000,
     "maxElementCount": 120,
     "allowedProcessNames": [
-      "Doolgram",
+      "MessagingApp",
       "chrome",
       "msedge",
       "firefox",
@@ -38,7 +38,8 @@
     ],
     "redactTextPatterns": [
       "(?i)password\\s*[:=]\\s*[^\\s]+",
-      "(?i)(api[_ -]?key|token|secret)\\s*[:=]\\s*[^\\s]+"
+      "(?i)(api[_ -]?key|token|secret)\\s*[:=]\\s*[^\\s]+",
+      "(?is)-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----"
     ]
   },
   "screenshotAnalyzer": {
