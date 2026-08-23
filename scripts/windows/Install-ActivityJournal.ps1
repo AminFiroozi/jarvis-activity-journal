@@ -12,6 +12,7 @@ $content = Join-Path $scriptRoot 'Collect-ActiveContent.ps1'
 $screen = Join-Path $scriptRoot 'Capture-Screen.ps1'
 $summary = Join-Path $scriptRoot 'New-ActivitySummary.ps1'
 $startup = Join-Path $scriptRoot 'Run-ActivityJournalNow.ps1'
+$visionStartup = Join-Path $scriptRoot 'Start-VisionService.ps1'
 $launcher = Join-Path $scriptRoot 'Run-Hidden.vbs'
 $wscript = Join-Path $env:WINDIR 'System32\wscript.exe'
 $actionArgs = { param($path) "`"$launcher`" `"$path`"" }
@@ -36,6 +37,7 @@ Register-JarvisTask -Name 'Jarvis Activity Journal - Project Evidence' -ScriptPa
 Register-JarvisTask -Name 'Jarvis Activity Journal - Content Collector' -ScriptPath $content -Trigger $collectorTrigger
 Register-JarvisTask -Name 'Jarvis Activity Journal - Screen Capture' -ScriptPath $screen -Trigger $collectorTrigger
 Register-JarvisTask -Name 'Jarvis Activity Journal - Startup' -ScriptPath $startup -Trigger $logonTrigger
+Register-JarvisTask -Name 'Jarvis Activity Journal - Vision Service' -ScriptPath $visionStartup -Trigger $logonTrigger
 Register-JarvisTask -Name 'Jarvis Activity Journal - Daily Summary' -ScriptPath $summary -Trigger $summaryTrigger
 
 Write-Output 'Installed scheduled tasks:'

@@ -8,6 +8,7 @@ $names = @(
     'Jarvis Activity Journal - Content Collector',
     'Jarvis Activity Journal - Screen Capture',
     'Jarvis Activity Journal - Startup',
+    'Jarvis Activity Journal - Vision Service',
     'Jarvis Activity Journal - Daily Summary'
 )
 foreach ($name in $names) {

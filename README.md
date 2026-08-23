@@ -23,6 +23,45 @@ python .\src\analyze_screenshots.py --journal-root C:\Path\To\Journal --date 202
 
 For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/completions` and configure its vision-capable model. The analyzer selects representative screenshots, asks for structured JSON, and writes `visual-YYYY-MM-DD.jsonl` into the journal's raw folder.
 
+## Windows installation
+
+1. Clone this repository.
+2. Copy `config/settings.example.json` to the journal root's `config/settings.json`.
+3. Set `projectPaths`, `screenshotAnalyzer.repositoryPath`, and the vision endpoint/model.
+4. Run the installer from PowerShell:
+
+```powershell
+.\scripts\windows\Install-ActivityJournal.ps1
+```
+
+The installer creates hidden logon and repeating tasks for activity, focused content, project evidence, screenshots, summaries, and the vision service. It does not require a terminal window to remain open.
+
+## LM Studio setup
+
+1. Download a vision model such as Qwen2.5-VL 3B in LM Studio.
+2. Start the LM Studio server on `http://localhost:1234`.
+3. Find the model identifier with `lms ls --json` or `GET http://localhost:1234/v1/models`.
+4. Set `screenshotAnalyzer.endpoint` to `http://localhost:1234/v1/chat/completions` and set `screenshotAnalyzer.model` to that identifier.
+5. Set `visionService.modelPattern` to a stable substring of the same model identifier.
+6. Run the installer again so the hidden vision-service logon task is registered.
+
+The vision task starts LM Studio's server at interactive logon and attempts to load a matching model. Its log is `Journal/raw/vision-service.log`.
+
+## Verification
+
+```powershell
+.\scripts\windows\Run-ActivityJournalNow.ps1
+.\scripts\windows\New-ActivitySummary.ps1
+Get-ScheduledTask | Where-Object TaskName -like 'Jarvis Activity Journal -*'
+Get-Content Journal\llm-context\latest.md
+```
+
+Successful screenshot analysis creates `Journal/raw/visual-YYYY-MM-DD.jsonl` entries and increases `Vision-analyzed screenshots` in `Journal/llm-context/latest.md`. HTTP 503 means the configured vision server is unavailable; check the server, model, endpoint, and `vision-service.log`.
+
+## Storage and privacy
+
+Set `OLLAMA_MODELS` or LM Studio's My Models directory to a drive with enough space. Keep `Journal/` outside Git; the repository ignores screenshots, raw JSONL, and journal data. Maximum capture can record private messages, credentials visible on screen, and corporate information.
+
 ## Repository layout
 
 - `src/analyze_screenshots.py` — provider-neutral screenshot analyzer
@@ -30,4 +69,5 @@ For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/co
 - `config/settings.example.json` — Windows collector configuration template
 - `scripts/Analyze-Screenshots.ps1` — Windows wrapper
 - `scripts/windows/` — collector, content capture, screen capture, scheduler, and journal scripts
+- `scripts/windows/Start-VisionService.ps1` — hidden logon startup for the local vision server/model
 - `LICENSE` — MIT license
