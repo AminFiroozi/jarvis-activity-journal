@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -Raw -LiteralPath (Join-Path $JournalRoot 'config\settings.json') | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'Test-ActivityJournalPrivateMode.ps1')
+if (Test-ActivityJournalPrivateMode -JournalRoot $JournalRoot) { exit 0 }
 if (-not $config.contentCapture.enabled) { exit 0 }
 if ($null -ne $config.privacy -and $config.privacy.captureEnabled -eq $false) { exit 0 }
 
@@ -89,4 +91,3 @@ $event = [ordered]@{
     captureMode = 'Windows UI Automation; focused window only'
 }
 ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
-

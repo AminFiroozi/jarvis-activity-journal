@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -Raw -LiteralPath (Join-Path $JournalRoot 'config\settings.json') | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'Test-ActivityJournalPrivateMode.ps1')
+if (Test-ActivityJournalPrivateMode -JournalRoot $JournalRoot) { exit 0 }
 $rawRoot = Join-Path $JournalRoot 'raw'
 New-Item -ItemType Directory -Force -Path $rawRoot | Out-Null
 $now = Get-Date
@@ -32,5 +34,4 @@ foreach ($configuredPath in @($config.projectPaths)) {
     }
     ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
 }
-
 

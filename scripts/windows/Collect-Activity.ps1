@@ -6,6 +6,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $configPath = Join-Path $JournalRoot 'config\settings.json'
 $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'Test-ActivityJournalPrivateMode.ps1')
+if (Test-ActivityJournalPrivateMode -JournalRoot $JournalRoot) { exit 0 }
 $rawRoot = Join-Path $JournalRoot 'raw'
 New-Item -ItemType Directory -Force -Path $rawRoot | Out-Null
 
@@ -61,5 +63,4 @@ $event = [ordered]@{
 }
 $outputPath = Join-Path $rawRoot ("activity-{0}.jsonl" -f $now.ToString('yyyy-MM-dd'))
 ($event | ConvertTo-Json -Compress -Depth 5) | Add-Content -LiteralPath $outputPath -Encoding utf8
-
 

@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $config = Get-Content -Raw -LiteralPath (Join-Path $JournalRoot 'config\settings.json') | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'Test-ActivityJournalPrivateMode.ps1')
+if (Test-ActivityJournalPrivateMode -JournalRoot $JournalRoot) { exit 0 }
 if (-not $config.contentCapture.enabled) { exit 0 }
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 
@@ -55,4 +57,3 @@ finally {
     $graphics.Dispose()
     $bitmap.Dispose()
 }
-
