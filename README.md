@@ -18,7 +18,7 @@ The analyzer expects an OpenAI-compatible `POST /chat/completions` endpoint that
 
 ```powershell
 $env:VISION_API_KEY = 'your-key'
-python .\src\analyze_screenshots.py --journal-root D:\JARVIS\Journal --date 2026-08-23 --endpoint https://example.invalid/v1/chat/completions --model vision-model
+python .\src\analyze_screenshots.py --journal-root C:\Path\To\Journal --date 2026-08-23 --endpoint https://example.invalid/v1/chat/completions --model vision-model
 ```
 
 For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/completions` and configure its vision-capable model. The analyzer selects representative screenshots, asks for structured JSON, and writes `visual-YYYY-MM-DD.jsonl` into the journal's raw folder.
@@ -27,5 +27,7 @@ For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/co
 
 - `src/analyze_screenshots.py` — provider-neutral screenshot analyzer
 - `config/analyzer.example.json` — safe configuration template
+- `config/settings.example.json` — Windows collector configuration template
 - `scripts/Analyze-Screenshots.ps1` — Windows wrapper
+- `scripts/windows/` — collector, content capture, screen capture, scheduler, and journal scripts
 - `LICENSE` — MIT license

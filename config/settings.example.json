@@ -1,0 +1,43 @@
+{
+  "sampleIntervalSeconds": 60,
+  "titleMaxLength": 180,
+  "retentionDays": 90,
+  "projectPaths": [
+    "C:\\Users\\YourName\\Projects"
+  ],
+  "redactTitlePatterns": [
+    "password",
+    "secret",
+    "token",
+    "api[ _-]?key",
+    "credential",
+    "private key"
+  ],
+  "contentCapture": {
+    "enabled": true,
+    "maxTextLength": 12000,
+    "maxElementCount": 120,
+    "allowedProcessNames": [
+      "Doolgram",
+      "chrome",
+      "msedge",
+      "firefox",
+      "Code",
+      "Code - Insiders",
+      "WindowsTerminal",
+      "pwsh"
+    ],
+    "redactTextPatterns": [
+      "(?i)password\\s*[:=]\\s*[^\\s]+",
+      "(?i)(api[_ -]?key|token|secret)\\s*[:=]\\s*[^\\s]+"
+    ]
+  },
+  "screenshotAnalyzer": {
+    "enabled": false,
+    "repositoryPath": "C:\\Path\\To\\jarvis-activity-journal",
+    "endpoint": "http://localhost:11434/v1/chat/completions",
+    "model": "llava",
+    "apiKeyEnv": "VISION_API_KEY",
+    "maxScreenshotsPerRun": 12
+  }
+}
