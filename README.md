@@ -26,7 +26,7 @@ Do not use this on a corporate device or with other people's conversations witho
 
 ## Screenshot analysis
 
-The analyzer expects an OpenAI-compatible `POST /chat/completions` endpoint that accepts image input. It works with local or remote providers. The same endpoint/model can also be used for text-only journal synthesis.
+The analyzer expects an OpenAI-compatible `POST /chat/completions` endpoint that accepts image input. It works with local or remote providers. The same endpoint/model can also be used for text-only journal synthesis. Before each request it optionally extracts OCR regions (text, confidence, and bounding box) and adds context-specific instructions for `terminal`, `browser`, `ide`, `messaging`, or `unknown` screenshots.
 
 For a remote provider, set its API key environment variable before running the analyzer:
 
@@ -37,7 +37,7 @@ python .\src\analyze_screenshots.py --journal-root C:\Path\To\Journal --date 202
 
 For local LM Studio or Ollama endpoints, do **not** set `VISION_API_KEY`; local requests work without an API key. The `apiKeyEnv` setting is only an optional hook for remote providers.
 
-For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/completions` and configure its vision-capable model. The analyzer selects representative screenshots, asks for structured JSON, and writes `visual-YYYY-MM-DD.jsonl` into the journal's raw folder.
+For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/completions` and configure its vision-capable model. The analyzer selects representative screenshots, asks for structured JSON, and writes `visual-YYYY-MM-DD.jsonl` into the journal's raw folder. OCR is failure-safe and optional: install `pytesseract` plus the Tesseract executable to enable it; otherwise the screenshot is still sent to Qwen-VL with an OCR-unavailable note. Prompt definitions are in `config/prompts.json`. Use `--context terminal|browser|ide|messaging|unknown` when the caller knows the active application context.
 
 ## Windows installation
 

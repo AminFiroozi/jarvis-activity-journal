@@ -1,0 +1,30 @@
+{
+  "base": {
+    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so and lower confidence. Do not include secrets: omit passwords, access tokens, API keys, private keys, message bodies, and other sensitive values.",
+    "output": {
+      "summary": "one concise sentence describing only visible activity",
+      "applications": "visible application names",
+      "projects": "visible project, repository, or website names",
+      "activity_type": "coding|browsing|chatting|meeting|media|administration|other",
+      "observations": "short list of directly observed facts",
+      "confidence": "number from 0.0 to 1.0"
+    }
+  },
+  "contexts": {
+    "terminal": {
+      "instructions": "Pay attention to the visible shell, command names, paths, exit status, and non-sensitive output. Summarize commands as actions without reproducing credentials or command arguments that contain secrets."
+    },
+    "browser": {
+      "instructions": "Pay attention to the visible site or documentation title, URL domain, page topic, and whether the user appears to be reading, searching, or completing a form. Do not transcribe private form fields or message content."
+    },
+    "ide": {
+      "instructions": "Pay attention to the visible editor, repository, file type, code or test activity, diagnostics, and build status. Describe code at a high level and do not reproduce source secrets or tokens."
+    },
+    "messaging": {
+      "instructions": "Identify the visible messaging application and broad conversation activity only. Do not transcribe message bodies, names, contact details, attachments, or other private content."
+    },
+    "unknown": {
+      "instructions": "Describe the visible application and broad activity conservatively. Do not guess the context when the application is unclear."
+    }
+  }
+}

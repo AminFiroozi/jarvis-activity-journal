@@ -12,19 +12,57 @@ import pathlib
 import urllib.error
 import urllib.request
 
-from screenshot_fingerprint import deduplicate_images
+try:
+    from ocr import extract_text
+    from screenshot_fingerprint import deduplicate_images
+except ImportError:  # Supports importing as ``src.analyze_screenshots`` in tests.
+    from src.ocr import extract_text
+    from src.screenshot_fingerprint import deduplicate_images
 
 
-PROMPT = """Analyze this computer screenshot for a personal activity journal.
-Return only valid JSON with these fields:
-{
-  "summary": "one concise sentence describing the visible activity",
-  "applications": ["visible app names"],
-  "projects": ["visible project or website names"],
-  "activity_type": "coding|browsing|chatting|meeting|media|administration|other",
-  "confidence": 0.0
-}
-Do not guess passwords, private message contents, or identities. If unclear, use empty arrays and lower confidence."""
+DEFAULT_PROMPTS = pathlib.Path(__file__).parents[1] / "config" / "prompts.json"
+
+
+def load_prompts(path: pathlib.Path) -> dict:
+    with path.open(encoding="utf-8") as handle:
+        prompts = json.load(handle)
+    if not isinstance(prompts, dict) or not isinstance(prompts.get("contexts"), dict):
+        raise ValueError("Prompt configuration must contain a contexts object")
+    return prompts
+
+
+def select_prompt_context(context: str, prompts: dict) -> dict:
+    normalized = (context or "unknown").strip().lower()
+    aliases = {"shell": "terminal", "powershell": "terminal", "editor": "ide", "chat": "messaging"}
+    normalized = aliases.get(normalized, normalized)
+    contexts = prompts["contexts"]
+    selected = contexts.get(normalized, contexts["unknown"])
+    base = prompts.get("base", {})
+    return {
+        "name": normalized if normalized in contexts else "unknown",
+        "instructions": f"{base.get('instructions', '')} {selected.get('instructions', '')}".strip(),
+        "output": base.get("output", {}),
+    }
+
+
+def build_prompt(context: str, prompts: dict, ocr_result: dict | None = None) -> str:
+    selected = select_prompt_context(context, prompts)
+    evidence = ocr_result or {"available": False, "regions": [], "reason": "not run"}
+    ocr_lines = [
+        f"- {region.get('text', '')} (confidence={region.get('confidence', 0):.2f}, box={region.get('box', [])})"
+        for region in evidence.get("regions", [])
+    ]
+    ocr_text = "\n".join(ocr_lines) if ocr_lines else f"OCR unavailable: {evidence.get('reason', 'no regions')}"
+    schema = json.dumps(selected["output"], ensure_ascii=False)
+    return f"""Analyze this computer screenshot for a personal activity journal.
+Context hint: {selected['name']}
+{selected['instructions']}
+
+OCR evidence is supplemental and may be wrong; use the screenshot as the source of truth:
+{ocr_text}
+
+Return only valid JSON matching this schema: {schema}
+Use empty arrays and lower confidence when evidence is unclear. Do not include secrets."""
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +74,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-key-env", default="VISION_API_KEY")
     parser.add_argument("--max-screenshots", type=int, default=12)
     parser.add_argument("--dedupe-threshold", type=int, default=4)
+    parser.add_argument("--context", default="unknown", choices=("terminal", "browser", "ide", "messaging", "unknown"))
+    parser.add_argument("--prompts", type=pathlib.Path, default=DEFAULT_PROMPTS)
     return parser.parse_args()
 
 
@@ -47,13 +87,15 @@ def select_representative_images(folder: pathlib.Path, limit: int) -> list[pathl
     return [images[index] for index in indexes]
 
 
-def call_vision(endpoint: str, model: str, api_key: str | None, image: pathlib.Path) -> dict:
+def call_vision(endpoint: str, model: str, api_key: str | None, image: pathlib.Path, context: str = "unknown", prompts: dict | None = None) -> dict:
     encoded = base64.b64encode(image.read_bytes()).decode("ascii")
+    prompt_config = prompts or load_prompts(DEFAULT_PROMPTS)
+    ocr_result = extract_text(image)
     body = {
         "model": model,
         "temperature": 0,
         "messages": [{"role": "user", "content": [
-            {"type": "text", "text": PROMPT},
+            {"type": "text", "text": build_prompt(context, prompt_config, ocr_result)},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
         ]}],
     }
@@ -90,11 +132,12 @@ def main() -> int:
         return 0
 
     api_key = os.environ.get(args.api_key_env)
+    prompts = load_prompts(args.prompts)
     results = []
     failures = []
     for image in images:
         try:
-            analysis = call_vision(args.endpoint, args.model, api_key, image)
+            analysis = call_vision(args.endpoint, args.model, api_key, image, args.context, prompts)
             results.append({"timestamp": dt.datetime.fromtimestamp(image.stat().st_mtime, dt.timezone.utc).isoformat(), "source": "screenshot-vision", "screenshot": str(image), "analysis": analysis})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
             failures.append({"screenshot": str(image), "error": str(error)})
