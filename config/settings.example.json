@@ -39,5 +39,12 @@
     "model": "llava",
     "apiKeyEnv": "VISION_API_KEY",
     "maxScreenshotsPerRun": 12
+  },
+  "journalSynthesis": {
+    "enabled": true,
+    "repositoryPath": "C:\\Path\\To\\jarvis-activity-journal",
+    "endpoint": "http://localhost:1234/v1/chat/completions",
+    "model": "qwen2.5-vl",
+    "apiKeyEnv": "VISION_API_KEY"
   }
 }

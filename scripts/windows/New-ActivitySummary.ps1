@@ -61,6 +61,8 @@ $lines.Add('- No screenshots, audio, webcam, keystrokes, clipboard, browser cont
 $lines.Add('- Application time is estimated from sampling frequency and excludes detected idle samples.')
 Set-Content -LiteralPath $outputPath -Value $lines -Encoding utf8
 & (Join-Path $PSScriptRoot 'New-LLMContext.ps1') | Out-Null
+$synthesis = Join-Path $PSScriptRoot 'Synthesize-Journal.ps1'
+if (Test-Path -LiteralPath $synthesis) { try { & $synthesis | Out-Null } catch { Write-Warning "Journal synthesis skipped: $($_.Exception.Message)" } }
 Write-Output $outputPath
 
 

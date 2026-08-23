@@ -75,6 +75,14 @@ Successful screenshot analysis creates `Journal/raw/visual-YYYY-MM-DD.jsonl` ent
 
 The journal-synthesis stage consumes the structured events and visual observations after screenshot analysis, then produces the daily narrative. Local model calls do not require an API key.
 
+Run the synthesis stage directly when testing:
+
+```powershell
+.\scripts\windows\Synthesize-Journal.ps1
+```
+
+It writes `raw/journal-YYYY-MM-DD.json`, updates `daily/YYYY-MM-DD.md` with an `LLM narrative` section, and writes a status file beside the raw events. A failed model call leaves the deterministic journal intact.
+
 ## Storage and privacy
 
 Set `OLLAMA_MODELS` or LM Studio's My Models directory to a drive with enough space. Keep `Journal/` outside Git; the repository ignores screenshots, raw JSONL, and journal data. Maximum capture can record private messages, credentials visible on screen, and corporate information.
@@ -87,4 +95,5 @@ Set `OLLAMA_MODELS` or LM Studio's My Models directory to a drive with enough sp
 - `scripts/Analyze-Screenshots.ps1` — Windows wrapper
 - `scripts/windows/` — collector, content capture, screen capture, scheduler, and journal scripts
 - `scripts/windows/Start-VisionService.ps1` — hidden logon startup for the local vision server/model
+- `scripts/windows/Synthesize-Journal.ps1` — invokes the same model for daily narrative synthesis
 - `LICENSE` — MIT license
