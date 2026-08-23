@@ -16,7 +16,7 @@ Implement phases in this order. Each phase must leave the repository runnable:
 
 1. Privacy controls and redaction
 2. Health diagnostics and failure monitoring
-3. Event schema, SQLite store, and durable processing queue
+3. Event schema, durable processing queue, and deferred SQLite store
 4. Screenshot deduplication and efficient vision processing
 5. Session detection and multi-level journals
 6. Local dashboard and operator controls
@@ -138,7 +138,9 @@ Create or modify these boundaries:
 
 ## Phase 3: Event schema, SQLite store, and durable queue
 
-### Task 6: Define versioned event schema
+### Task 6: Define versioned event schema and SQLite store — DEFERRED
+
+> Deferred temporarily by project decision. Keep JSONL as the current event store until SQLite is resumed. The queue in Task 8 must use a storage interface so it can move to SQLite later.
 
 **Files:**
 - Create: `docs/event-schema.md`
@@ -167,7 +169,9 @@ Create or modify these boundaries:
 - [ ] Add JSONL export so users can inspect and back up their data.
 - [ ] Commit: `feat: add versioned SQLite event store`.
 
-### Task 7: Import existing JSONL and switch reads to SQLite
+### Task 7: Import existing JSONL and switch reads to SQLite — DEFERRED
+
+> Deferred temporarily by project decision. No existing JSONL consumers should be migrated to SQLite in the interim.
 
 **Files:**
 - Create: `src/import_jsonl.py`
@@ -182,7 +186,7 @@ Create or modify these boundaries:
 - [ ] Preserve JSONL as an export/debug format while making SQLite the primary read path.
 - [ ] Commit: `feat: migrate journal consumers to SQLite`.
 
-### Task 8: Add durable processing queue
+### Task 8: Add durable processing queue without SQLite
 
 **Files:**
 - Create: `src/processing_queue.py`
@@ -191,7 +195,7 @@ Create or modify these boundaries:
 - Create: `tests/test_processing_queue.py`
 
 - [ ] Write tests for enqueue, claim, retry, dead-letter, and successful completion.
-- [ ] Implement jobs with `pending`, `processing`, `completed`, and `failed` states, attempt counts, and exponential retry timestamps.
+- [ ] Implement jobs as JSON files under `Journal/queue/` with `pending`, `processing`, `completed`, and `failed` states, attempt counts, and exponential retry timestamps. Keep the queue API independent of this file layout so SQLite can replace it later.
 - [ ] Ensure a crashed worker can reclaim jobs stuck in `processing`.
 - [ ] Commit: `feat: add durable vision and journal job queue`.
 
