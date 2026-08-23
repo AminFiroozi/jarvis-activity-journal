@@ -2,6 +2,15 @@
   "sampleIntervalSeconds": 60,
   "titleMaxLength": 180,
   "retentionDays": 90,
+  "privacy": {
+    "captureEnabled": true,
+    "privateModeHotkey": "Ctrl+Alt+Pause",
+    "excludedApplications": [],
+    "excludedWindowTitlePatterns": [],
+    "redactBeforeStorage": true,
+    "retentionDays": 14,
+    "deleteRawScreenshotsAfterAnalysis": false
+  },
   "projectPaths": [
     "C:\\Users\\YourName\\Projects"
   ],

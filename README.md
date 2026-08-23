@@ -18,6 +18,7 @@ The model handles visual understanding and text synthesis. PowerShell handles co
 - Journal data is written outside this repository by default.
 - Screenshots and raw activity files are ignored by Git.
 - API keys are read from environment variables and never from committed files.
+- Privacy settings support capture enablement, excluded applications and window titles, redaction-before-storage, retention, and raw screenshot deletion after analysis.
 - Screenshot analysis is opt-in through a local configuration file.
 - The analyzer sends screenshots only to the endpoint you configure.
 
@@ -42,7 +43,7 @@ For a local provider, use an endpoint such as `http://localhost:11434/v1/chat/co
 
 1. Clone this repository.
 2. Copy `config/settings.example.json` to the journal root's `config/settings.json`.
-3. Set `projectPaths`, `screenshotAnalyzer.repositoryPath`, and the vision endpoint/model.
+3. Set `projectPaths`, `screenshotAnalyzer.repositoryPath`, the vision endpoint/model, and review the `privacy` block before enabling capture.
 4. Run the installer from PowerShell:
 
 ```powershell
