@@ -12,6 +12,8 @@ import pathlib
 import urllib.error
 import urllib.request
 
+from screenshot_fingerprint import deduplicate_images
+
 
 PROMPT = """Analyze this computer screenshot for a personal activity journal.
 Return only valid JSON with these fields:
@@ -33,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--api-key-env", default="VISION_API_KEY")
     parser.add_argument("--max-screenshots", type=int, default=12)
+    parser.add_argument("--dedupe-threshold", type=int, default=4)
     return parser.parse_args()
 
 
@@ -81,6 +84,7 @@ def main() -> int:
     output = raw_dir / f"visual-{args.date}.jsonl"
     status = raw_dir / f"visual-{args.date}.status.json"
     images = select_representative_images(screenshot_dir, max(1, args.max_screenshots)) if screenshot_dir.exists() else []
+    images = deduplicate_images(images, threshold=max(0, args.dedupe_threshold))
     if not images:
         status.write_text(json.dumps({"date": args.date, "status": "no-screenshots"}) + "\n", encoding="utf-8")
         return 0
