@@ -78,7 +78,8 @@
     "cloud-vision-groq": {
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "model": "meta-llama/llama-4-scout-17b-16e-instruct",
-      "apiKeyEnv": "GROQ_API_KEY"
+      "apiKeyEnv": "GROQ_API_KEY",
+      "proxy": "http://127.0.0.1:10808"
     },
     "cloud-vision-mistral": {
       "endpoint": "https://api.mistral.ai/v1/chat/completions",
@@ -88,7 +89,8 @@
     "cloud-text-groq": {
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "model": "openai/gpt-oss-120b",
-      "apiKeyEnv": "GROQ_API_KEY"
+      "apiKeyEnv": "GROQ_API_KEY",
+      "proxy": "http://127.0.0.1:10808"
     },
     "cloud-text-gemini": {
       "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -100,7 +102,9 @@
     "enabled": false,
     "activeProvider": "local-vision",
     "intervalSeconds": 900,
-    "maxScreenshotsPerRun": 12
+    "maxScreenshotsPerRun": 12,
+    "maxAttempts": 5,
+    "retryDelaySeconds": 60
   },
   "journalSynthesis": {
     "enabled": true,

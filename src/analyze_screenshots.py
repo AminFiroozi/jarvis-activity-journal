@@ -7,16 +7,19 @@ import argparse
 import base64
 import bisect
 import datetime as dt
+import hashlib
 import json
 import pathlib
 
 try:
     from model_client import ProviderError, call_chat_completions, resolve_provider
     from ocr import extract_text
+    from processing_queue import FileJobQueue
     from screenshot_fingerprint import deduplicate_images
 except ImportError:  # Supports importing as ``src.analyze_screenshots`` in tests.
     from src.model_client import ProviderError, call_chat_completions, resolve_provider
     from src.ocr import extract_text
+    from src.processing_queue import FileJobQueue
     from src.screenshot_fingerprint import deduplicate_images
 
 
@@ -129,11 +132,17 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def select_representative_images(images: list[pathlib.Path], limit: int) -> list[pathlib.Path]:
-    if len(images) <= limit or limit <= 1:
-        return images[:limit]
-    indexes = [round(index * (len(images) - 1) / (limit - 1)) for index in range(limit)]
-    return [images[index] for index in indexes]
+def job_id_for(image: pathlib.Path) -> str:
+    digest = hashlib.sha256(str(image).encode("utf-8")).hexdigest()[:12]
+    return f"{image.stat().st_mtime:015.3f}-{digest}"
+
+
+def _has_pending_jobs(queue: FileJobQueue, kind: str) -> bool:
+    for path in (queue.root / "pending").glob("*.json"):
+        job = json.loads(path.read_text(encoding="utf-8"))
+        if job.get("kind") == kind:
+            return True
+    return False
 
 
 def load_analyzed_screenshots(output: pathlib.Path) -> set[str]:
@@ -182,9 +191,16 @@ def main() -> int:
     all_images = sorted(screenshot_dir.glob("*.jpg"), key=lambda path: path.stat().st_mtime) if screenshot_dir.exists() else []
     analyzed = load_analyzed_screenshots(output)
     candidates = [image for image in all_images if str(image) not in analyzed]
-    images = select_representative_images(candidates, max(1, int(analyzer_config.get("maxScreenshotsPerRun", 12))))
-    images = deduplicate_images(images, threshold=max(0, int(screenshot_config.get("dedupeHammingThreshold", 4))))
-    if not images:
+    candidates = deduplicate_images(candidates, threshold=max(0, int(screenshot_config.get("dedupeHammingThreshold", 4))))
+
+    queue = FileJobQueue(journal / "queue")
+    window_events = load_window_events(journal, args.date)
+    for image in candidates:
+        context = nearest_context(window_events, image.stat().st_mtime, args.context)
+        queue.enqueue("vision", {"screenshot": str(image), "date": args.date, "context": context}, job_id=job_id_for(image))
+
+    max_per_run = max(1, int(analyzer_config.get("maxScreenshotsPerRun", 12)))
+    if not _has_pending_jobs(queue, "vision"):
         status.write_text(json.dumps({"date": args.date, "status": "no-screenshots"}) + "\n", encoding="utf-8")
         return 0
 
@@ -195,21 +211,35 @@ def main() -> int:
         print(f"Screenshot analysis failed: {error}")
         return 1
     prompts = load_prompts(args.prompts)
-    window_events = load_window_events(journal, args.date)
+    max_attempts = int(analyzer_config.get("maxAttempts", 5))
+    retry_delay_seconds = int(analyzer_config.get("retryDelaySeconds", 60))
+
     results = []
     failures = []
-    for image in images:
-        context = nearest_context(window_events, image.stat().st_mtime, args.context)
+    processed = 0
+    attempted_this_run: set[str] = set()
+    while processed < max_per_run:
+        job = queue.claim(kind="vision", exclude_ids=attempted_this_run)
+        if job is None:
+            break
+        attempted_this_run.add(job["id"])
+        processed += 1
+        image = pathlib.Path(job["payload"]["screenshot"])
+        context = job["payload"].get("context", "unknown")
         try:
             analysis = call_vision(provider, image, context, prompts)
+            queue.complete(job["id"], {"ok": True})
             results.append({"timestamp": dt.datetime.fromtimestamp(image.stat().st_mtime, dt.timezone.utc).isoformat(), "source": "screenshot-vision", "screenshot": str(image), "analysis": analysis})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
-            failures.append({"screenshot": str(image), "error": str(error)})
+            outcome = queue.fail(job["id"], str(error), max_attempts=max_attempts, retry_delay_seconds=retry_delay_seconds)
+            failures.append({"screenshot": str(image), "error": str(error), "queueStatus": outcome["status"], "attempts": outcome["attempts"]})
+
     with output.open("a", encoding="utf-8") as handle:
         for result in results:
             handle.write(json.dumps(result, ensure_ascii=False) + "\n")
-    status.write_text(json.dumps({"date": args.date, "status": "complete" if not failures else "partial", "analyzed": len(results), "failed": failures}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"analyzed": len(results), "failed": len(failures), "output": str(output)}))
+    remaining = sum(1 for _ in (journal / "queue" / "pending").glob("*.json"))
+    status.write_text(json.dumps({"date": args.date, "status": "complete" if not failures else "partial", "analyzed": len(results), "failed": failures, "queuedRemaining": remaining}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps({"analyzed": len(results), "failed": len(failures), "queuedRemaining": remaining, "output": str(output)}))
     return 0 if results or not failures else 1
 
 

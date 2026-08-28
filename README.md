@@ -65,7 +65,9 @@ On some Windows configurations, registering the logon-trigger startup task fails
 "journalSynthesis":   { "activeProvider": "cloud-text" }
 ```
 
-Any OpenAI-compatible `POST /chat/completions` endpoint works — local (LM Studio, Ollama) or cloud. Set the provider's `apiKeyEnv` variable in your shell before a cloud provider will authenticate; local providers usually need none.
+Any OpenAI-compatible `POST /chat/completions` endpoint works — local (LM Studio, Ollama) or cloud. Set the provider's `apiKeyEnv` variable in your shell before a cloud provider will authenticate; local providers usually need none. A provider can also set `"proxy": "http://host:port"` — every request to that provider is routed through it (`urllib`'s `ProxyHandler`); leave it unset to connect directly. Use this for any provider whose region restricts your network — see the OFAC note below.
+
+Set the API key with `setx VARNAME "key"`, not `$env:VARNAME = "key"` — `setx` persists it to the Windows user environment so scheduled tasks (which run non-interactively) can see it; a session-only `$env:` assignment won't be visible to them.
 
 ### Researched free-tier cloud providers (as of 2026-08-28)
 
@@ -103,7 +105,8 @@ Every collectors.projectEvidence.intervalSeconds (default 15 min)
   `- project_evidence.py -> git evidence for configured projects -> Journal/raw/activity-DATE.jsonl
 
 Every screenshotAnalyzer.intervalSeconds (default 15 min)
-  `- analyze_screenshots.py -> representative, deduped screenshots -> vision model
+  `- analyze_screenshots.py -> deduped screenshots enqueued to Journal/queue/
+                               -> up to maxScreenshotsPerRun drained per run -> vision model
                                -> Journal/raw/visual-DATE.jsonl
                                (per-screenshot prompt picked from the app active at capture time)
 
@@ -120,6 +123,10 @@ dailySummary.time (default 23:55)
 ```
 
 On constrained hardware a single vision-analysis run over a dozen screenshots can take many minutes; every scheduled job is registered with an execution time limit and "ignore new instance" so a slow run blocks its own next trigger instead of stacking concurrent model loads.
+
+### Durable retry queue
+
+Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.dashboard` exposes queue depth per state.
 
 ## Verification
 

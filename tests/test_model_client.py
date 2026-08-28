@@ -16,6 +16,24 @@ class ResolveProviderTests(unittest.TestCase):
         self.assertEqual(provider["model"], "m")
         self.assertEqual(provider["name"], "local-vision")
 
+    def test_resolves_optional_proxy(self):
+        config = {
+            "providers": {
+                "cloud-vision-groq": {"endpoint": "https://api.groq.com/openai/v1/chat/completions", "model": "m", "proxy": "http://127.0.0.1:10808"}
+            },
+            "screenshotAnalyzer": {"activeProvider": "cloud-vision-groq"},
+        }
+        provider = resolve_provider(config, "screenshotAnalyzer")
+        self.assertEqual(provider["proxy"], "http://127.0.0.1:10808")
+
+    def test_proxy_defaults_to_none(self):
+        config = {
+            "providers": {"local-vision": {"endpoint": "http://localhost:1234/v1/chat/completions", "model": "m"}},
+            "screenshotAnalyzer": {"activeProvider": "local-vision"},
+        }
+        provider = resolve_provider(config, "screenshotAnalyzer")
+        self.assertIsNone(provider["proxy"])
+
     def test_missing_active_provider_raises(self):
         config = {"providers": {}, "screenshotAnalyzer": {}}
         with self.assertRaises(ProviderError):

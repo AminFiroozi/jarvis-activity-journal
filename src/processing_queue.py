@@ -37,9 +37,18 @@ class FileJobQueue:
         temporary.write_text(json.dumps(job, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(temporary, target)
 
-    def enqueue(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def find(self, job_id: str) -> tuple[str, dict[str, Any]] | None:
+        for state in self.states:
+            path = self._path(state, job_id)
+            if path.exists():
+                return state, json.loads(path.read_text(encoding="utf-8"))
+        return None
+
+    def enqueue(self, kind: str, payload: dict[str, Any], job_id: str | None = None) -> dict[str, Any]:
+        if job_id and self.find(job_id):
+            return self.find(job_id)[1]
         job = {
-            "id": str(uuid.uuid4()),
+            "id": job_id or str(uuid.uuid4()),
             "kind": kind,
             "payload": payload,
             "status": "pending",
@@ -50,10 +59,14 @@ class FileJobQueue:
         self._write("pending", job)
         return job
 
-    def claim(self) -> dict[str, Any] | None:
+    def claim(self, kind: str | None = None, exclude_ids: set[str] | None = None) -> dict[str, Any] | None:
         now = _now()
         for path in sorted((self.root / "pending").glob("*.json")):
             job = json.loads(path.read_text(encoding="utf-8"))
+            if kind is not None and job.get("kind") != kind:
+                continue
+            if exclude_ids and job["id"] in exclude_ids:
+                continue
             if dt.datetime.fromisoformat(job["availableAt"]) > now:
                 continue
             job["status"] = "processing"
