@@ -71,9 +71,19 @@ def upsert_narrative(markdown: str, narrative: dict) -> str:
     return markdown.rstrip() + "\n\n" + section
 
 
-def local_time(event: dict) -> str:
-    stamp = event.get("localTimestamp") or event.get("timestamp") or ""
-    return stamp[11:16] if len(stamp) >= 16 else stamp
+def local_time(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        stamp = str(value)
+        return stamp[11:16] if len(stamp) >= 16 else stamp
+    return parsed.astimezone().strftime("%H:%M")
+
+
+def _event_stamp(event: dict) -> str | None:
+    return event.get("localTimestamp") or event.get("timestamp")
 
 
 def truncate(text: str, limit: int) -> str:
@@ -85,33 +95,23 @@ def compact_event(event: dict) -> dict | None:
     source = event.get("source")
     if source == "foreground-window":
         exe = pathlib.Path(str(event.get("executable", ""))).stem or event.get("process", "")
-        return {"t": local_time(event), "type": "window", "app": exe, "title": truncate(event.get("windowTitle", ""), 60)}
+        return {"t": local_time(_event_stamp(event)), "type": "window", "app": exe, "title": truncate(event.get("windowTitle", ""), 60)}
     if source == "focused-content":
-        return {"t": local_time(event), "type": "content", "app": event.get("process", ""), "text": truncate(event.get("content", ""), 150)}
+        return {"t": local_time(_event_stamp(event)), "type": "content", "app": event.get("process", ""), "text": truncate(event.get("content", ""), 150)}
     if source == "screenshot-vision":
         analysis = event.get("analysis") or {}
-        return {"t": local_time(event), "type": "screen", "summary": truncate(analysis.get("summary", ""), 200), "apps": analysis.get("applications", []), "activity": analysis.get("activity_type", "")}
+        return {"t": local_time(_event_stamp(event)), "type": "screen", "summary": truncate(analysis.get("summary", ""), 200), "apps": analysis.get("applications", []), "activity": analysis.get("activity_type", "")}
     return None
 
 
 def compact_session(session: dict) -> dict:
-    start = _session_local_time(session.get("startAt"))
-    end = _session_local_time(session.get("endAt"))
+    start = local_time(session.get("startAt"))
+    end = local_time(session.get("endAt"))
     return {
         "t": f"{start}-{end}" if start and end else start or end,
         "class": session.get("classification", "unknown"),
         "apps": session.get("apps") or [],
     }
-
-
-def _session_local_time(iso_utc: str | None) -> str:
-    if not iso_utc:
-        return ""
-    try:
-        parsed = dt.datetime.fromisoformat(iso_utc)
-    except ValueError:
-        return iso_utc[11:16] if len(iso_utc) >= 16 else iso_utc
-    return parsed.astimezone().strftime("%H:%M")
 
 
 def read_events(journal: pathlib.Path, date: str) -> dict:
