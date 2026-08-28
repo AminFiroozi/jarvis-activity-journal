@@ -1,5 +1,6 @@
 {
   "repositoryPath": "C:\\Path\\To\\jarvis-activity-journal",
+  "vaultRoot": "C:\\Path\\To\\ObsidianVault",
   "titleMaxLength": 180,
   "retentionDays": 90,
   "projectPaths": [
