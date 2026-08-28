@@ -65,7 +65,13 @@ This registers one job per collector (Task Scheduler on Windows, systemd user ti
 
 Any OpenAI-compatible `POST /chat/completions` endpoint works — local (LM Studio, Ollama) or cloud. Set the provider's `apiKeyEnv` variable in your shell before a cloud provider will authenticate; local providers usually need none. A provider can also set `"proxy": "http://host:port"` — every request to that provider is routed through it (`urllib`'s `ProxyHandler`); leave it unset to connect directly. Use this for any provider whose region restricts your network — see the OFAC note below.
 
-`apiKeyEnv` can also be a list of env var names instead of one — `"apiKeyEnv": ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"]` — for round-robin key rotation against a single provider, e.g. to stack several free-tier accounts' rate limits. Only the ones actually set are used; unset names are silently skipped. On a 429, the client immediately retries with the next key (no sleep) before cycling back to the first key and only then backing off — a full cycle through all keys has to fail before it waits at all.
+`apiKeyEnv` can also be a list of env var names instead of one — `"apiKeyEnv": ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"]` — for round-robin key rotation against a single provider, e.g. to stack several free-tier accounts' rate limits. Only the ones actually set are used; unset names are silently skipped.
+
+**On Groq specifically, rate limits are per-organization** — every project and every key you create *within the same account* draws from one shared pool, so extra keys from one account add nothing. Each key in the list has to come from a genuinely separate account (separate email signup) to actually add budget.
+
+`model` can similarly become `"models": ["model-a", "model-b"]` to rotate across models on the same provider — useful because Groq's token-per-minute limits are enforced per model, not just per organization, so alternating models gives real extra headroom on top of key rotation, even within one account.
+
+Both dimensions combine: with N keys and M models, a 429 tries every (key, model) combination in turn — no sleep between them — before cycling back to the first pair and only then backing off. A full pass through every combination has to fail before it waits at all.
 
 Set the API key with `setx VARNAME "key"`, not `$env:VARNAME = "key"` — `setx` persists it to the Windows user environment so scheduled tasks (which run non-interactively) can see it; a session-only `$env:` assignment won't be visible to them.
 
