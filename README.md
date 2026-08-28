@@ -65,6 +65,8 @@ This registers one job per collector (Task Scheduler on Windows, systemd user ti
 
 Any OpenAI-compatible `POST /chat/completions` endpoint works — local (LM Studio, Ollama) or cloud. Set the provider's `apiKeyEnv` variable in your shell before a cloud provider will authenticate; local providers usually need none. A provider can also set `"proxy": "http://host:port"` — every request to that provider is routed through it (`urllib`'s `ProxyHandler`); leave it unset to connect directly. Use this for any provider whose region restricts your network — see the OFAC note below.
 
+`apiKeyEnv` can also be a list of env var names instead of one — `"apiKeyEnv": ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"]` — for round-robin key rotation against a single provider, e.g. to stack several free-tier accounts' rate limits. Only the ones actually set are used; unset names are silently skipped. On a 429, the client immediately retries with the next key (no sleep) before cycling back to the first key and only then backing off — a full cycle through all keys has to fail before it waits at all.
+
 Set the API key with `setx VARNAME "key"`, not `$env:VARNAME = "key"` — `setx` persists it to the Windows user environment so scheduled tasks (which run non-interactively) can see it; a session-only `$env:` assignment won't be visible to them.
 
 ### Researched free-tier cloud providers (as of 2026-08-28)
