@@ -78,6 +78,7 @@
     "cloud-vision-groq": {
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "model": "qwen/qwen3.8-27b",
+      "models": ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b"],
       "apiKeyEnv": "GROQ_API_KEY",
       "proxy": "http://127.0.0.1:10808"
     },

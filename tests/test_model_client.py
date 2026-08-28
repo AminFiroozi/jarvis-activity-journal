@@ -16,8 +16,16 @@ class ResolveProviderTests(unittest.TestCase):
         }
         provider = resolve_provider(config, "screenshotAnalyzer")
         self.assertEqual(provider["endpoint"], "http://localhost:1234/v1/chat/completions")
-        self.assertEqual(provider["model"], "m")
+        self.assertEqual(provider["models"], ["m"])
         self.assertEqual(provider["name"], "local-vision")
+
+    def test_multiple_models_resolve_to_list(self):
+        config = {
+            "providers": {"g": {"endpoint": "e", "model": "m1", "models": ["m1", "m2"]}},
+            "screenshotAnalyzer": {"activeProvider": "g"},
+        }
+        provider = resolve_provider(config, "screenshotAnalyzer")
+        self.assertEqual(provider["models"], ["m1", "m2"])
 
     def test_resolves_optional_proxy(self):
         config = {
@@ -105,6 +113,37 @@ class CallChatCompletionsRotationTests(unittest.TestCase):
 
         self.assertEqual(result, "ok")
         self.assertEqual(calls, ["Bearer key-a", "Bearer key-b", "Bearer key-a"])
+        sleep_mock.assert_called_once()
+
+    def test_rotates_through_model_and_key_combinations_before_sleeping(self):
+        provider = {
+            "name": "g", "endpoint": "https://example.invalid",
+            "models": ["m1", "m2"], "api_keys": ["key-a", "key-b"],
+            "extra_headers": {}, "proxy": None,
+        }
+        seen = []
+
+        def fake_open(request, timeout=None):
+            body = json.loads(request.data.decode("utf-8"))
+            seen.append((request.get_header("Authorization"), body["model"]))
+            if len(seen) <= 4:
+                raise self._http_error(429)
+            return self._fake_response({"choices": [{"message": {"content": "ok"}}]})
+
+        with mock.patch("src.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.model_client.time.sleep") as sleep_mock:
+            result = call_chat_completions(provider, [{"role": "user", "content": "hi"}])
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(
+            seen,
+            [
+                ("Bearer key-a", "m1"),
+                ("Bearer key-b", "m1"),
+                ("Bearer key-a", "m2"),
+                ("Bearer key-b", "m2"),
+                ("Bearer key-a", "m1"),
+            ],
+        )
         sleep_mock.assert_called_once()
 
     @staticmethod

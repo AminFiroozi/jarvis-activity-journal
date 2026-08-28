@@ -28,10 +28,11 @@ def resolve_provider(config: dict, stage: str) -> dict:
     api_key_env = provider.get("apiKeyEnv")
     env_names = api_key_env if isinstance(api_key_env, list) else ([api_key_env] if api_key_env else [])
     api_keys = [os.environ[name] for name in env_names if os.environ.get(name)]
+    models = provider.get("models") or [provider["model"]]
     return {
         "name": provider_name,
         "endpoint": provider["endpoint"],
-        "model": provider["model"],
+        "models": models,
         "api_keys": api_keys,
         "extra_headers": provider.get("headers") or {},
         "proxy": provider.get("proxy"),
@@ -49,13 +50,11 @@ def _parse_retry_after(error: urllib.error.HTTPError, attempt: int) -> float:
 
 
 def call_chat_completions(provider: dict, messages: list[dict], temperature: float = 0.2, timeout: int = 600) -> str:
-    body = {"model": provider["model"], "temperature": temperature, "messages": messages}
     base_headers = {
         "Content-Type": "application/json",
         "User-Agent": "Mozilla/5.0 (compatible; jarvis-activity-journal/1.0)",
         **provider.get("extra_headers", {}),
     }
-    request_body = json.dumps(body).encode("utf-8")
 
     opener = urllib.request.urlopen
     proxy_url = provider.get("proxy")
@@ -63,14 +62,18 @@ def call_chat_completions(provider: dict, messages: list[dict], temperature: flo
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})).open
 
     keys = provider.get("api_keys") or [None]
-    max_attempts = MAX_RATE_LIMIT_RETRIES * len(keys)
+    models = provider.get("models") or [provider.get("model")]
+    combo_count = len(keys) * len(models)
+    max_attempts = MAX_RATE_LIMIT_RETRIES * combo_count
     attempt = 0
     while True:
         key = keys[attempt % len(keys)]
+        model = models[(attempt // len(keys)) % len(models)]
         headers = dict(base_headers)
         if key:
             headers["Authorization"] = f"Bearer {key}"
-        request = urllib.request.Request(provider["endpoint"], data=request_body, headers=headers, method="POST")
+        body = {"model": model, "temperature": temperature, "messages": messages}
+        request = urllib.request.Request(provider["endpoint"], data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
         try:
             with opener(request, timeout=timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
@@ -78,9 +81,9 @@ def call_chat_completions(provider: dict, messages: list[dict], temperature: flo
         except urllib.error.HTTPError as error:
             if error.code == 429 and attempt < max_attempts:
                 attempt += 1
-                if len(keys) > 1 and attempt % len(keys) != 0:
+                if attempt % combo_count != 0:
                     continue
-                time.sleep(_parse_retry_after(error, attempt // len(keys)))
+                time.sleep(_parse_retry_after(error, attempt // combo_count))
                 continue
             detail = error.read().decode("utf-8", errors="replace")[:500]
             raise ProviderError(f"{provider['name']}: HTTP {error.code} — {detail}") from error
