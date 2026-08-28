@@ -68,6 +68,28 @@ class JournalizeTests(unittest.TestCase):
         self.assertIn("Visual Studio Code", markdown)
         self.assertNotIn("unknown", markdown)
 
+    def test_screen_evidence_collapses_runs_regardless_of_app_list_order(self):
+        markdown = render_journal(
+            "Daily journal",
+            [
+                {
+                    "source": "screenshot-vision",
+                    "timestamp": "2026-08-23T10:00:00+00:00",
+                    "analysis": {"applications": ["Code", "Chrome"], "summary": "coding"},
+                },
+                {
+                    "source": "screenshot-vision",
+                    "timestamp": "2026-08-23T10:01:00+00:00",
+                    "analysis": {"applications": ["Chrome", "Code"], "summary": "coding"},
+                },
+            ],
+            [],
+        )
+
+        evidence_lines = [line for line in markdown.splitlines() if line.startswith("- ") and "screen" in line]
+        self.assertEqual(len(evidence_lines), 1)
+        self.assertIn("(2 samples)", evidence_lines[0])
+
 
 if __name__ == "__main__":
     unittest.main()
