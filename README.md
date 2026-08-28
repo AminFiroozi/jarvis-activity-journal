@@ -67,6 +67,22 @@ On some Windows configurations, registering the logon-trigger startup task fails
 
 Any OpenAI-compatible `POST /chat/completions` endpoint works — local (LM Studio, Ollama) or cloud. Set the provider's `apiKeyEnv` variable in your shell before a cloud provider will authenticate; local providers usually need none.
 
+### Researched free-tier cloud providers (as of 2026-08-28)
+
+`config/settings.example.json` ships these profiles pre-defined but **inactive** (`activeProvider` still points at `local-*`) — switching to one is a one-line config edit, never automatic.
+
+| Profile | Provider | Model | Free-tier ceiling | Card required | Notes |
+|---|---|---|---|---|---|
+| `cloud-vision-gemini` | Google Gemini | `gemini-2.5-flash-lite` | ~1,000 req/day | No | Free-tier prompts are used to improve Google's models |
+| `cloud-vision-groq` | Groq | `meta-llama/llama-4-scout-17b-16e-instruct` | ~1,000 req/day | No | |
+| `cloud-vision-mistral` | Mistral La Plateforme | `ministral-3-8b-25-12` | ~2 req/min (thin for a 12-image batch) | No | Free-tier prompts may be used for training |
+| `cloud-text-groq` | Groq | `openai/gpt-oss-120b` | ~1,000 req/day, structured JSON output support | No | |
+| `cloud-text-gemini` | Google Gemini | `gemini-2.5-flash` | ~250-1,500 req/day | No | |
+
+All comfortably clear this pipeline's volume (dozens to a few hundred calls/day). None require a credit card for the free tier. GitHub Models (retired July 2026), Cerebras and DeepSeek (both now require a card or are trial-only), Together AI, and HuggingFace Inference were researched and ruled out.
+
+**If you're accessing these from Iran (or any OFAC-sanctioned jurisdiction): Google, Groq, Cloudflare, OpenRouter, and GitHub are all US-domiciled and explicitly restrict access under US export-control law — Google's own terms name Iran directly.** Route traffic through a proxy, or prefer Mistral (EU-domiciled, not bound by the same comprehensive embargo, though EU sectoral sanctions still apply) if you need an option that's more likely to work unproxied. This isn't a pipeline bug if a cloud provider silently fails from a restricted IP — it's the provider enforcing sanctions compliance.
+
 ### Local LM Studio setup (Windows)
 
 1. Download a vision-capable model (e.g. Qwen2.5-VL) in LM Studio and start its server on `http://localhost:1234`.

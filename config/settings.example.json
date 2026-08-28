@@ -69,6 +69,31 @@
       "endpoint": "http://localhost:1234/v1/chat/completions",
       "model": "qwen2.5-vl",
       "apiKeyEnv": "VISION_API_KEY"
+    },
+    "cloud-vision-gemini": {
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model": "gemini-2.5-flash-lite",
+      "apiKeyEnv": "GEMINI_API_KEY"
+    },
+    "cloud-vision-groq": {
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "meta-llama/llama-4-scout-17b-16e-instruct",
+      "apiKeyEnv": "GROQ_API_KEY"
+    },
+    "cloud-vision-mistral": {
+      "endpoint": "https://api.mistral.ai/v1/chat/completions",
+      "model": "ministral-3-8b-25-12",
+      "apiKeyEnv": "MISTRAL_API_KEY"
+    },
+    "cloud-text-groq": {
+      "endpoint": "https://api.groq.com/openai/v1/chat/completions",
+      "model": "openai/gpt-oss-120b",
+      "apiKeyEnv": "GROQ_API_KEY"
+    },
+    "cloud-text-gemini": {
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+      "model": "gemini-2.5-flash",
+      "apiKeyEnv": "GEMINI_API_KEY"
     }
   },
   "screenshotAnalyzer": {
