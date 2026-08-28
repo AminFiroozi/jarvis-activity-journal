@@ -47,7 +47,11 @@ def _parse_retry_after(error: urllib.error.HTTPError, attempt: int) -> float:
 
 def call_chat_completions(provider: dict, messages: list[dict], temperature: float = 0.2, timeout: int = 600) -> str:
     body = {"model": provider["model"], "temperature": temperature, "messages": messages}
-    headers = {"Content-Type": "application/json", **provider.get("extra_headers", {})}
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; jarvis-activity-journal/1.0)",
+        **provider.get("extra_headers", {}),
+    }
     if provider.get("api_key"):
         headers["Authorization"] = f"Bearer {provider['api_key']}"
     request_body = json.dumps(body).encode("utf-8")
