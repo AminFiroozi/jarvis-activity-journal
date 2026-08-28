@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import os
 import pathlib
-import urllib.error
-import urllib.request
+
+try:
+    from model_client import ProviderError, call_chat_completions, resolve_provider
+except ImportError:
+    from src.model_client import ProviderError, call_chat_completions, resolve_provider
 
 
 PROMPT = """You are writing a factual personal activity journal from observed computer events.
@@ -29,10 +31,8 @@ Do not invent intent, accomplishments, people, conversations, or conclusions. Ma
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal-root", required=True)
+    parser.add_argument("--config", required=True, type=pathlib.Path)
     parser.add_argument("--date", default=dt.date.today().isoformat())
-    parser.add_argument("--endpoint", required=True)
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--api-key-env", default="VISION_API_KEY")
     return parser.parse_args()
 
 
@@ -73,6 +73,29 @@ def upsert_narrative(markdown: str, narrative: dict) -> str:
     return markdown.rstrip() + "\n\n" + section
 
 
+def local_time(event: dict) -> str:
+    stamp = event.get("localTimestamp") or event.get("timestamp") or ""
+    return stamp[11:16] if len(stamp) >= 16 else stamp
+
+
+def truncate(text: str, limit: int) -> str:
+    text = str(text).strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def compact_event(event: dict) -> dict | None:
+    source = event.get("source")
+    if source == "foreground-window":
+        exe = pathlib.Path(str(event.get("executable", ""))).stem or event.get("process", "")
+        return {"t": local_time(event), "type": "window", "app": exe, "title": truncate(event.get("windowTitle", ""), 60)}
+    if source == "focused-content":
+        return {"t": local_time(event), "type": "content", "app": event.get("process", ""), "text": truncate(event.get("content", ""), 150)}
+    if source == "screenshot-vision":
+        analysis = event.get("analysis") or {}
+        return {"t": local_time(event), "type": "screen", "summary": truncate(analysis.get("summary", ""), 200), "apps": analysis.get("applications", []), "activity": analysis.get("activity_type", "")}
+    return None
+
+
 def read_events(journal: pathlib.Path, date: str) -> list[dict]:
     events: list[dict] = []
     for filename in (f"activity-{date}.jsonl", f"content-{date}.jsonl", f"visual-{date}.jsonl"):
@@ -82,30 +105,29 @@ def read_events(journal: pathlib.Path, date: str) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 try:
-                    events.append(json.loads(line))
+                    compacted = compact_event(json.loads(line))
                 except json.JSONDecodeError:
                     continue
-    return events[-120:]
+                if compacted:
+                    events.append(compacted)
+    return events[-150:]
 
 
-def call_model(endpoint: str, model: str, api_key: str | None, events: list[dict]) -> dict:
+def call_model(provider: dict, events: list[dict]) -> dict:
     evidence = json.dumps(events, ensure_ascii=False, separators=(",", ":"))
-    body = {"model": model, "temperature": 0.2, "messages": [{"role": "system", "content": PROMPT}, {"role": "user", "content": f"Observed events for the day:\n{evidence}"}]}
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    request = urllib.request.Request(endpoint, data=json.dumps(body).encode("utf-8"), headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=180) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    content = payload["choices"][0]["message"]["content"]
-    if isinstance(content, list):
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    max_chars = 6000
+    while len(evidence) > max_chars and len(events) > 10:
+        events = events[len(events) // 5:]
+        evidence = json.dumps(events, ensure_ascii=False, separators=(",", ":"))
+    messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": f"Observed events for the day:\n{evidence}"}]
+    content = call_chat_completions(provider, messages, temperature=0.2)
     return parse_model_json(content)
 
 
 def main() -> int:
     args = parse_args()
     journal = pathlib.Path(args.journal_root)
+    config = json.loads(args.config.read_text(encoding="utf-8"))
     events = read_events(journal, args.date)
     status_path = journal / "raw" / f"journal-{args.date}.status.json"
     status_path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,8 +135,9 @@ def main() -> int:
         status_path.write_text(json.dumps({"date": args.date, "status": "no-events"}) + "\n", encoding="utf-8")
         return 0
     try:
-        narrative = call_model(args.endpoint, args.model, os.environ.get(args.api_key_env), events)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+        provider = resolve_provider(config, "journalSynthesis")
+        narrative = call_model(provider, events)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
         status_path.write_text(json.dumps({"date": args.date, "status": "failed", "error": str(error)}) + "\n", encoding="utf-8")
         print(f"Journal synthesis failed: {error}")
         return 1

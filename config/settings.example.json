@@ -1,16 +1,7 @@
 {
-  "sampleIntervalSeconds": 60,
+  "repositoryPath": "C:\\Path\\To\\jarvis-activity-journal",
   "titleMaxLength": 180,
   "retentionDays": 90,
-  "privacy": {
-    "captureEnabled": true,
-    "privateModeHotkey": "Ctrl+Alt+Pause",
-    "excludedApplications": [],
-    "excludedWindowTitlePatterns": [],
-    "redactBeforeStorage": true,
-    "retentionDays": 14,
-    "deleteRawScreenshotsAfterAnalysis": false
-  },
   "projectPaths": [
     "C:\\Users\\YourName\\Projects"
   ],
@@ -22,39 +13,89 @@
     "credential",
     "private key"
   ],
-  "contentCapture": {
-    "enabled": true,
-    "maxTextLength": 12000,
-    "maxElementCount": 120,
-    "allowedProcessNames": [
-      "MessagingApp",
-      "chrome",
-      "msedge",
-      "firefox",
-      "Code",
-      "Code - Insiders",
-      "WindowsTerminal",
-      "pwsh"
-    ],
-    "redactTextPatterns": [
-      "(?i)password\\s*[:=]\\s*[^\\s]+",
-      "(?i)(api[_ -]?key|token|secret)\\s*[:=]\\s*[^\\s]+",
-      "(?is)-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----"
-    ]
+  "privacy": {
+    "captureEnabled": true,
+    "privateModeHotkey": "Ctrl+Alt+Pause",
+    "excludedApplications": [],
+    "excludedWindowTitlePatterns": [],
+    "redactBeforeStorage": true,
+    "retentionDays": 14,
+    "deleteRawScreenshotsAfterAnalysis": false
+  },
+  "collectors": {
+    "activity": {
+      "enabled": true,
+      "intervalSeconds": 60
+    },
+    "content": {
+      "enabled": true,
+      "intervalSeconds": 60,
+      "maxTextLength": 12000,
+      "maxElementCount": 120,
+      "allowedProcessNames": [
+        "MessagingApp",
+        "chrome",
+        "msedge",
+        "firefox",
+        "Code",
+        "Code - Insiders",
+        "WindowsTerminal",
+        "pwsh"
+      ],
+      "redactTextPatterns": [
+        "(?i)password\\s*[:=]\\s*[^\\s]+",
+        "(?i)(api[_ -]?key|token|secret)\\s*[:=]\\s*[^\\s]+",
+        "(?is)-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----"
+      ]
+    },
+    "screenshot": {
+      "enabled": true,
+      "intervalSeconds": 60,
+      "jpegQuality": 60,
+      "dedupeHammingThreshold": 4
+    },
+    "projectEvidence": {
+      "enabled": true,
+      "intervalSeconds": 900
+    }
+  },
+  "providers": {
+    "local-vision": {
+      "endpoint": "http://localhost:1234/v1/chat/completions",
+      "model": "qwen2.5-vl",
+      "apiKeyEnv": "VISION_API_KEY"
+    },
+    "local-text": {
+      "endpoint": "http://localhost:1234/v1/chat/completions",
+      "model": "qwen2.5-vl",
+      "apiKeyEnv": "VISION_API_KEY"
+    }
   },
   "screenshotAnalyzer": {
     "enabled": false,
-    "repositoryPath": "C:\\Path\\To\\jarvis-activity-journal",
-    "endpoint": "http://localhost:11434/v1/chat/completions",
-    "model": "llava",
-    "apiKeyEnv": "VISION_API_KEY",
+    "activeProvider": "local-vision",
+    "intervalSeconds": 900,
     "maxScreenshotsPerRun": 12
   },
   "journalSynthesis": {
     "enabled": true,
-    "repositoryPath": "C:\\Path\\To\\jarvis-activity-journal",
-    "endpoint": "http://localhost:1234/v1/chat/completions",
-    "model": "qwen2.5-vl",
-    "apiKeyEnv": "VISION_API_KEY"
+    "activeProvider": "local-text"
+  },
+  "hourlyBuild": {
+    "enabled": true,
+    "intervalSeconds": 3600
+  },
+  "dailySummary": {
+    "enabled": true,
+    "time": "23:55"
+  },
+  "visionService": {
+    "enabled": true,
+    "serverUrl": "http://localhost:1234/v1",
+    "modelPattern": "qwen2.5-vl",
+    "gpu": "auto",
+    "contextLength": 4096,
+    "parallel": 1,
+    "loadOnLogon": true
   }
 }

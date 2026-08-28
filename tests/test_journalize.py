@@ -6,7 +6,7 @@ from src.journalize import render_journal, write_journal_documents
 
 
 class JournalizeTests(unittest.TestCase):
-    def test_renders_sessions_and_evidence(self):
+    def test_renders_sessions_and_evidence_as_human_readable_text(self):
         markdown = render_journal(
             "Daily journal",
             [
@@ -19,6 +19,7 @@ class JournalizeTests(unittest.TestCase):
                     "endAt": "2026-08-23T10:30:00+00:00",
                     "classification": "coding",
                     "confidence": 0.9,
+                    "apps": ["Code"],
                     "eventIds": ["e1"],
                 }
             ],
@@ -26,7 +27,10 @@ class JournalizeTests(unittest.TestCase):
 
         self.assertIn("# Daily journal", markdown)
         self.assertIn("coding", markdown)
-        self.assertIn("Evidence: `e1`", markdown)
+        self.assertIn("30m", markdown)
+        self.assertIn("Code", markdown)
+        self.assertNotIn("`e1`", markdown)
+        self.assertNotIn("2026-08-23T10:00:00+00:00", markdown)
 
     def test_empty_journal_is_explicit_and_repeatable(self):
         first = render_journal("Empty", [], [])

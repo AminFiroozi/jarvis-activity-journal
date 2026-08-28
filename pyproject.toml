@@ -1,0 +1,20 @@
+[project]
+name = "jarvis-activity-journal"
+version = "0.2.0"
+description = "Local-first, cross-platform activity collection and journal generation."
+requires-python = ">=3.10"
+dependencies = [
+    "Pillow>=10.0",
+    "mss>=9.0",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+ocr = ["pytesseract>=0.3"]
+linux = ["python-xlib>=0.33"]
+macos = ["pyobjc-framework-Quartz>=10.0"]
+windows = ["pywinauto>=0.6.8"]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

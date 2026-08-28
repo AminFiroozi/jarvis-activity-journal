@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -58,6 +60,24 @@ def run_local_checks(root: Path, minimum_free_bytes: int = 1_000_000_000) -> lis
     return checks
 
 
+def _scheduler_checks() -> list[dict[str, Any]]:
+    system = platform.system()
+    expected = ["activity", "content", "screenshot", "project-evidence", "vision-analysis", "hourly", "daily-summary", "startup"]
+    if system == "Windows":
+        if not shutil.which("schtasks"):
+            return [_check("scheduler", False, "schtasks not found", required=False)]
+        result = subprocess.run(["schtasks", "/Query", "/FO", "CSV"], capture_output=True, text=True)
+        installed = result.stdout
+        return [_check(f"scheduled-task:{name}", f"Jarvis Activity Journal - {name}" in installed, "Task Scheduler", required=False) for name in expected]
+    if system == "Linux":
+        if not shutil.which("systemctl"):
+            return [_check("scheduler", False, "systemctl not found", required=False)]
+        result = subprocess.run(["systemctl", "--user", "list-unit-files", "jarvis-*"], capture_output=True, text=True)
+        installed = result.stdout
+        return [_check(f"scheduled-task:{name}", f"jarvis-{name}" in installed, "systemd --user", required=False) for name in expected]
+    return [_check("scheduler", False, f"no scheduler check implemented for {system!r}", required=False)]
+
+
 def doctor_exit_code(checks: list[dict[str, Any]]) -> int:
     if any(not check["ok"] and check.get("required", True) for check in checks):
         return 1
@@ -72,10 +92,11 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()
     checks = run_local_checks(args.journal_root)
+    scheduler_checks = _scheduler_checks()
     if args.as_json:
-        print(json.dumps({"checks": checks, "exitCode": doctor_exit_code(checks)}))
+        print(json.dumps({"checks": checks, "schedulerChecks": scheduler_checks, "exitCode": doctor_exit_code(checks)}))
     else:
-        for check in checks:
+        for check in checks + scheduler_checks:
             status = "PASS" if check["ok"] else ("FAIL" if check.get("required", True) else "WARN")
             print(f"[{status}] {check['name']}: {check['detail']}")
     return doctor_exit_code(checks)

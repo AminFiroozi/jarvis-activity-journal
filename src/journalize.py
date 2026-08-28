@@ -8,34 +8,87 @@ from pathlib import Path
 from typing import Any
 
 
+_KIND_LABELS = {"foreground-window": "window", "focused-content": "content", "screenshot-vision": "screen", "git-project": "project"}
+
+
+def _local_time(value: str | None, fmt: str = "%H:%M") -> str:
+    if not value:
+        return "?"
+    try:
+        parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    return parsed.astimezone().strftime(fmt)
+
+
+def _duration_label(start: str | None, end: str | None) -> str:
+    try:
+        start_dt = dt.datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        end_dt = dt.datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return ""
+    minutes = max(0, round((end_dt - start_dt).total_seconds() / 60))
+    if minutes < 1:
+        return "under a minute"
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, remainder = divmod(minutes, 60)
+    return f"{hours}h{remainder:02d}m" if remainder else f"{hours}h"
+
+
+def _event_kind_and_app(event: dict[str, Any]) -> tuple[str, str]:
+    kind = event.get("kind") or event.get("source") or "activity"
+    application = event.get("application") or event.get("process") or "unknown"
+    return _KIND_LABELS.get(kind, kind), application
+
+
+def _event_time(event: dict[str, Any]) -> str | None:
+    return event.get("observedAt") or event.get("timestamp")
+
+
+def _render_evidence(events: list[dict[str, Any]]) -> list[str]:
+    lines = []
+    index = 0
+    while index < len(events):
+        signature = _event_kind_and_app(events[index])
+        start_time = _event_time(events[index])
+        run_end = index
+        while run_end + 1 < len(events) and _event_kind_and_app(events[run_end + 1]) == signature:
+            run_end += 1
+        end_time = _event_time(events[run_end])
+        count = run_end - index + 1
+        kind_label, application = signature
+        time_label = _local_time(start_time) if count == 1 or start_time == end_time else f"{_local_time(start_time)}–{_local_time(end_time)}"
+        suffix = "" if count == 1 else f" ({count} samples)"
+        lines.append(f"- {time_label} — {kind_label} — {application}{suffix}")
+        index = run_end + 1
+    return lines
+
+
 def render_journal(title: str, events: list[dict[str, Any]], sessions: list[dict[str, Any]]) -> str:
     lines = [f"# {title}", "", "## Activity sessions", ""]
     if not sessions:
         lines.append("No activity evidence was recorded for this period.")
     else:
         counts = Counter(session.get("classification", "unknown") for session in sessions)
-        lines.append("Time allocation: " + ", ".join(f"{name} ({count})" for name, count in sorted(counts.items())) + ".")
+        lines.append("Time allocation: " + ", ".join(f"{name} ({count} session{'s' if count != 1 else ''})" for name, count in sorted(counts.items())) + ".")
         lines.append("")
         for session in sessions:
             classification = session.get("classification", "unknown")
-            confidence = session.get("confidence", 0)
-            start = session.get("startAt", "unknown")
-            end = session.get("endAt", "unknown")
-            lines.append(f"- **{classification}** — {start} to {end} (confidence: {confidence:.2f})")
-            evidence = session.get("eventIds", [])
-            if evidence:
-                lines.append("  Evidence: " + ", ".join(f"`{event_id}`" for event_id in evidence))
+            start = session.get("startAt")
+            end = session.get("endAt")
+            apps = session.get("apps") or []
+            duration = _duration_label(start, end)
+            time_range = f"{_local_time(start)}–{_local_time(end)}"
+            detail = f" ({duration})" if duration else ""
+            apps_label = f" — {', '.join(apps)}" if apps else ""
+            lines.append(f"- {time_range}{detail} — {classification}{apps_label}")
 
     lines.extend(["", "## Evidence", ""])
     if not events:
         lines.append("No activity evidence was recorded for this period.")
     else:
-        for event in events:
-            event_id = event.get("id", "unknown")
-            observed = event.get("observedAt", event.get("timestamp", "unknown"))
-            kind = event.get("kind", event.get("source", "activity"))
-            application = event.get("application", event.get("process", "unknown"))
-            lines.append(f"- `{event_id}` — {observed} — {kind} — {application}")
+        lines.extend(_render_evidence(events))
 
     return "\n".join(lines).rstrip() + "\n"
 

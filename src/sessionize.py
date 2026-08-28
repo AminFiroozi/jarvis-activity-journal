@@ -112,6 +112,14 @@ def _application(event: dict[str, Any]) -> str:
     return ""
 
 
+def _application_display_name(event: dict[str, Any]) -> str:
+    for key in ("application", "applicationName", "process", "executable"):
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def _is_idle(event: dict[str, Any]) -> bool:
     if event.get("active") is False or event.get("idle") is True:
         return True
@@ -141,7 +149,10 @@ def _compatible(previous: tuple[datetime, int, dict[str, Any]], current: tuple[d
     current_time, _, current_event = current
     if (current_time - previous_time).total_seconds() >= MAX_GAP_SECONDS:
         return False
-    if _is_idle(previous_event) or _is_idle(current_event):
+    previous_idle, current_idle = _is_idle(previous_event), _is_idle(current_event)
+    if previous_idle and current_idle:
+        return True
+    if previous_idle or current_idle:
         return False
     previous_project, current_project = _project(previous_event), _project(current_event)
     if previous_project and current_project and previous_project != current_project:
@@ -162,12 +173,14 @@ def _build_session(number: int, items: list[tuple[datetime, int, dict[str, Any]]
     timestamps = [item[0] for item in items]
     events = [item[2] for item in items]
     classification, confidence = _classify(events)
+    apps = sorted({_application_display_name(event) for event in events if _application_display_name(event)})
     return {
         "id": f"session-{number}",
         "startAt": _format_time(min(timestamps)),
         "endAt": _format_time(max(timestamps)),
         "classification": classification,
         "confidence": confidence,
+        "apps": apps,
         "eventIds": [event.get("id") or f"event-{position}" for _, position, event in items],
     }
 

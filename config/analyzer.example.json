@@ -1,7 +1,0 @@
-{
-  "endpoint": "http://localhost:11434/v1/chat/completions",
-  "model": "llava",
-  "apiKeyEnv": "VISION_API_KEY",
-  "maxScreenshotsPerRun": 12,
-  "jpegQualityNote": "Screenshots are already compressed by the collector."
-}

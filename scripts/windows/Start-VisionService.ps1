@@ -28,7 +28,10 @@ if ($modelLine -match '"modelKey"\s*:\s*"([^"]+)"') { $modelKey = $Matches[1] }
 if (-not $modelKey -and $modelLine -match '"key"\s*:\s*"([^"]+)"') { $modelKey = $Matches[1] }
 if (-not $modelKey) { "[$(Get-Date -Format o)] Found vision model but could not determine model key" | Add-Content -LiteralPath $logPath; exit 0 }
 
-"[$(Get-Date -Format o)] Loading vision model $modelKey" | Add-Content -LiteralPath $logPath
-& $lms load $modelKey --gpu=$($config.visionService.gpu) *>> $logPath
+$contextLength = if ($config.visionService.contextLength) { $config.visionService.contextLength } else { 4096 }
+$parallel = if ($config.visionService.parallel) { $config.visionService.parallel } else { 1 }
+$gpuArgs = if ($config.visionService.gpu -and $config.visionService.gpu -ne 'auto') { @('--gpu', $config.visionService.gpu) } else { @() }
+"[$(Get-Date -Format o)] Loading vision model $modelKey (context=$contextLength, parallel=$parallel, gpu=$($config.visionService.gpu))" | Add-Content -LiteralPath $logPath
+& $lms load $modelKey @gpuArgs --context-length $contextLength --parallel $parallel -y *>> $logPath
 
 

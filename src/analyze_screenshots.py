@@ -5,22 +5,76 @@ from __future__ import annotations
 
 import argparse
 import base64
+import bisect
 import datetime as dt
 import json
-import os
 import pathlib
-import urllib.error
-import urllib.request
 
 try:
+    from model_client import ProviderError, call_chat_completions, resolve_provider
     from ocr import extract_text
     from screenshot_fingerprint import deduplicate_images
 except ImportError:  # Supports importing as ``src.analyze_screenshots`` in tests.
+    from src.model_client import ProviderError, call_chat_completions, resolve_provider
     from src.ocr import extract_text
     from src.screenshot_fingerprint import deduplicate_images
 
 
 DEFAULT_PROMPTS = pathlib.Path(__file__).parents[1] / "config" / "prompts.json"
+
+_CONTEXT_APP_HINTS = {
+    "terminal": ("powershell", "pwsh", "cmd", "windowsterminal", "conhost", "bash", "wt", "wsl", "termius", "putty"),
+    "browser": ("chrome", "msedge", "firefox", "brave", "opera", "vivaldi"),
+    "ide": ("code", "devenv", "pycharm", "idea", "webstorm", "sublime_text", "cursor", "clion", "rider"),
+    "messaging": ("telegram", "doolgram", "discord", "slack", "outlook", "teams", "whatsapp", "signal"),
+}
+
+
+def infer_context(app_name: str) -> str:
+    lowered = (app_name or "").lower()
+    for context, hints in _CONTEXT_APP_HINTS.items():
+        if any(hint in lowered for hint in hints):
+            return context
+    return "unknown"
+
+
+def load_window_events(journal: pathlib.Path, date: str) -> list[tuple[float, str]]:
+    """Return sorted (epoch_seconds, process) pairs from foreground-window events for the date."""
+    path = journal / "raw" / f"activity-{date}.jsonl"
+    events: list[tuple[float, str]] = []
+    if not path.exists():
+        return events
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("source") != "foreground-window":
+            continue
+        timestamp, process = record.get("timestamp"), record.get("process")
+        if not timestamp or not process:
+            continue
+        try:
+            epoch = dt.datetime.fromisoformat(str(timestamp).replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+        events.append((epoch, process))
+    events.sort(key=lambda item: item[0])
+    return events
+
+
+def nearest_context(window_events: list[tuple[float, str]], target_epoch: float, fallback: str) -> str:
+    if not window_events:
+        return fallback
+    times = [item[0] for item in window_events]
+    index = bisect.bisect_left(times, target_epoch)
+    candidates = [candidate for candidate in (index - 1, index) if 0 <= candidate < len(window_events)]
+    if not candidates:
+        return fallback
+    best = min(candidates, key=lambda candidate: abs(window_events[candidate][0] - target_epoch))
+    return infer_context(window_events[best][1])
 
 
 def load_prompts(path: pathlib.Path) -> dict:
@@ -68,49 +122,46 @@ Use empty arrays and lower confidence when evidence is unclear. Do not include s
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal-root", required=True)
+    parser.add_argument("--config", required=True, type=pathlib.Path)
     parser.add_argument("--date", default=dt.date.today().isoformat())
-    parser.add_argument("--endpoint", required=True)
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--api-key-env", default="VISION_API_KEY")
-    parser.add_argument("--max-screenshots", type=int, default=12)
-    parser.add_argument("--dedupe-threshold", type=int, default=4)
     parser.add_argument("--context", default="unknown", choices=("terminal", "browser", "ide", "messaging", "unknown"))
     parser.add_argument("--prompts", type=pathlib.Path, default=DEFAULT_PROMPTS)
     return parser.parse_args()
 
 
-def select_representative_images(folder: pathlib.Path, limit: int) -> list[pathlib.Path]:
-    images = sorted(folder.glob("*.jpg"), key=lambda path: path.stat().st_mtime)
-    if len(images) <= limit:
-        return images
+def select_representative_images(images: list[pathlib.Path], limit: int) -> list[pathlib.Path]:
+    if len(images) <= limit or limit <= 1:
+        return images[:limit]
     indexes = [round(index * (len(images) - 1) / (limit - 1)) for index in range(limit)]
     return [images[index] for index in indexes]
 
 
-def call_vision(endpoint: str, model: str, api_key: str | None, image: pathlib.Path, context: str = "unknown", prompts: dict | None = None) -> dict:
+def load_analyzed_screenshots(output: pathlib.Path) -> set[str]:
+    if not output.exists():
+        return set()
+    analyzed: set[str] = set()
+    with output.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                analyzed.add(json.loads(line)["screenshot"])
+            except (json.JSONDecodeError, KeyError):
+                continue
+    return analyzed
+
+
+def call_vision(provider: dict, image: pathlib.Path, context: str = "unknown", prompts: dict | None = None) -> dict:
     encoded = base64.b64encode(image.read_bytes()).decode("ascii")
     prompt_config = prompts or load_prompts(DEFAULT_PROMPTS)
     ocr_result = extract_text(image)
-    body = {
-        "model": model,
-        "temperature": 0,
-        "messages": [{"role": "user", "content": [
-            {"type": "text", "text": build_prompt(context, prompt_config, ocr_result)},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
-        ]}],
-    }
-    request = urllib.request.Request(
-        endpoint,
-        data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {api_key}"} if api_key else {})},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=120) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    content = payload["choices"][0]["message"]["content"]
-    if isinstance(content, list):
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-    content = str(content).strip().removeprefix("```json").removesuffix("```").strip()
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": build_prompt(context, prompt_config, ocr_result)},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
+    ]}]
+    content = call_chat_completions(provider, messages, temperature=0)
+    content = content.strip().removeprefix("```json").removesuffix("```").strip()
     parsed = json.loads(content)
     if not isinstance(parsed, dict):
         raise ValueError("Vision response was not a JSON object")
@@ -120,26 +171,39 @@ def call_vision(endpoint: str, model: str, api_key: str | None, image: pathlib.P
 def main() -> int:
     args = parse_args()
     journal = pathlib.Path(args.journal_root)
+    config = json.loads(args.config.read_text(encoding="utf-8"))
+    analyzer_config = config.get("screenshotAnalyzer") or {}
+    screenshot_config = (config.get("collectors") or {}).get("screenshot") or {}
     screenshot_dir = journal / "screenshots" / args.date
     raw_dir = journal / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     output = raw_dir / f"visual-{args.date}.jsonl"
     status = raw_dir / f"visual-{args.date}.status.json"
-    images = select_representative_images(screenshot_dir, max(1, args.max_screenshots)) if screenshot_dir.exists() else []
-    images = deduplicate_images(images, threshold=max(0, args.dedupe_threshold))
+    all_images = sorted(screenshot_dir.glob("*.jpg"), key=lambda path: path.stat().st_mtime) if screenshot_dir.exists() else []
+    analyzed = load_analyzed_screenshots(output)
+    candidates = [image for image in all_images if str(image) not in analyzed]
+    images = select_representative_images(candidates, max(1, int(analyzer_config.get("maxScreenshotsPerRun", 12))))
+    images = deduplicate_images(images, threshold=max(0, int(screenshot_config.get("dedupeHammingThreshold", 4))))
     if not images:
         status.write_text(json.dumps({"date": args.date, "status": "no-screenshots"}) + "\n", encoding="utf-8")
         return 0
 
-    api_key = os.environ.get(args.api_key_env)
+    try:
+        provider = resolve_provider(config, "screenshotAnalyzer")
+    except ProviderError as error:
+        status.write_text(json.dumps({"date": args.date, "status": "failed", "error": str(error)}) + "\n", encoding="utf-8")
+        print(f"Screenshot analysis failed: {error}")
+        return 1
     prompts = load_prompts(args.prompts)
+    window_events = load_window_events(journal, args.date)
     results = []
     failures = []
     for image in images:
+        context = nearest_context(window_events, image.stat().st_mtime, args.context)
         try:
-            analysis = call_vision(args.endpoint, args.model, api_key, image, args.context, prompts)
+            analysis = call_vision(provider, image, context, prompts)
             results.append({"timestamp": dt.datetime.fromtimestamp(image.stat().st_mtime, dt.timezone.utc).isoformat(), "source": "screenshot-vision", "screenshot": str(image), "analysis": analysis})
-        except (OSError, ValueError, KeyError, json.JSONDecodeError, urllib.error.URLError) as error:
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
             failures.append({"screenshot": str(image), "error": str(error)})
     with output.open("a", encoding="utf-8") as handle:
         for result in results:
