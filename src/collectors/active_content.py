@@ -13,45 +13,47 @@ import datetime as dt
 import json
 import pathlib
 import platform
-import re
 import sys
 
-try:
-    from heartbeat import write_heartbeat
-    from privacy_state import is_private_mode
-except ImportError:
-    from src.heartbeat import write_heartbeat
-    from src.privacy_state import is_private_mode
+from src.infra.heartbeat import write_heartbeat
+from src.infra.privacy import is_excluded, redact_text
+from src.infra.privacy_state import is_private_mode
 
 _warned_unsupported = False
 _TEXT_CONTROL_TYPES = {"Text", "Edit", "ListItem", "Document", "TabItem"}
 
 
-def _capture_windows(allowed_process_names: list[str], max_element_count: int) -> tuple[str | None, str | None, int | None]:
+def _capture_windows(allowed_process_names: list[str], max_element_count: int) -> tuple[str | None, str | None, int | None, str | None]:
     try:
         import ctypes
 
         import psutil
         from pywinauto import Desktop
     except ImportError:
-        return None, None, None
+        return None, None, None, None
 
     handle = ctypes.windll.user32.GetForegroundWindow()
     if not handle:
-        return None, None, None
+        return None, None, None, None
     try:
         window = Desktop(backend="uia").window(handle=handle).wrapper_object()
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
     try:
         process_id = window.process_id()
         process_name = psutil.Process(process_id).name().removesuffix(".exe")
     except Exception:
-        return None, None, None
+        return None, None, None, None
 
     if allowed_process_names and process_name not in allowed_process_names:
-        return None, None, None
+        return None, None, None, None
+
+    window_title = None
+    try:
+        window_title = window.window_text()
+    except Exception:
+        pass
 
     parts: list[str] = []
     count = 0
@@ -75,10 +77,10 @@ def _capture_windows(allowed_process_names: list[str], max_element_count: int) -
             return
 
     visit(window)
-    return "\n".join(parts), process_name, process_id
+    return "\n".join(parts), process_name, process_id, window_title
 
 
-def capture_focused_content(allowed_process_names: list[str], max_element_count: int) -> tuple[str | None, str | None, int | None]:
+def capture_focused_content(allowed_process_names: list[str], max_element_count: int) -> tuple[str | None, str | None, int | None, str | None]:
     global _warned_unsupported
     system = platform.system()
     if system == "Windows":
@@ -86,13 +88,7 @@ def capture_focused_content(allowed_process_names: list[str], max_element_count:
     if not _warned_unsupported:
         print(f"active_content: focused-content capture is not implemented on {system!r}; skipping.", file=sys.stderr)
         _warned_unsupported = True
-    return None, None, None
-
-
-def redact(text: str, patterns: list[str]) -> str:
-    for pattern in patterns:
-        text = re.sub(pattern, "[REDACTED]", text)
-    return text
+    return None, None, None, None
 
 
 def parse_args() -> argparse.Namespace:
@@ -115,17 +111,17 @@ def main() -> int:
     if privacy.get("captureEnabled") is False:
         return 0
 
-    text, process_name, process_id = capture_focused_content(
+    text, process_name, process_id, window_title = capture_focused_content(
         content_config.get("allowedProcessNames") or [],
         int(content_config.get("maxElementCount", 120)),
     )
     if not text or not text.strip():
         return 0
-    if process_name and process_name in (privacy.get("excludedApplications") or []):
+    if is_excluded(process_name or "", window_title or "", privacy):
         return 0
 
     if privacy.get("redactBeforeStorage", True):
-        text = redact(text, content_config.get("redactTextPatterns") or [])
+        text = redact_text(text, content_config.get("redactTextPatterns") or []).text
     max_length = int(content_config.get("maxTextLength", 12000))
     if len(text) > max_length:
         text = text[:max_length] + "…"

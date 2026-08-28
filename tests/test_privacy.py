@@ -1,6 +1,6 @@
 import unittest
 
-from src.privacy import is_excluded, redact_text
+from src.infra.privacy import is_excluded, redact_text
 
 
 class PrivacyTests(unittest.TestCase):

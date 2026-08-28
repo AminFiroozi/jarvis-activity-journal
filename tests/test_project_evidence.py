@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.project_evidence import collect_project_event
+from src.collectors.project_evidence import collect_project_event
 
 
 def _run(*args: str, cwd: Path) -> None:

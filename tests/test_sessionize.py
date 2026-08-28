@@ -1,6 +1,6 @@
 import unittest
 
-from src.sessionize import detect_sessions
+from src.analysis.sessionize import detect_sessions
 
 
 def event(event_id, minute, **values):

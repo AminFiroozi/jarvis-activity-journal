@@ -1,6 +1,6 @@
 import unittest
 
-from src.window_activity import redact_title
+from src.collectors.window_activity import redact_title
 
 
 class RedactTitleTests(unittest.TestCase):

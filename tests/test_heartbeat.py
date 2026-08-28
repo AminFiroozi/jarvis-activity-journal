@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.heartbeat import write_heartbeat
+from src.infra.heartbeat import write_heartbeat
 
 
 class HeartbeatTests(unittest.TestCase):

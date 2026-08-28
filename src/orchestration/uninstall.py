@@ -7,10 +7,7 @@ import pathlib
 import platform
 import subprocess
 
-try:
-    from install import DAILY_JOB, INTERVAL_JOBS, LOGON_JOB, TASK_PREFIX, VISION_SERVICE_JOB, _systemd_dir
-except ImportError:
-    from src.install import DAILY_JOB, INTERVAL_JOBS, LOGON_JOB, TASK_PREFIX, VISION_SERVICE_JOB, _systemd_dir
+from src.orchestration.install import DAILY_JOB, INTERVAL_JOBS, LOGON_JOB, TASK_PREFIX, VISION_SERVICE_JOB, _systemd_dir
 
 
 def uninstall_windows() -> None:

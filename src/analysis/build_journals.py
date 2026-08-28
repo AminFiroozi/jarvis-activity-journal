@@ -8,12 +8,8 @@ import datetime as dt
 import json
 import pathlib
 
-try:
-    from journalize import render_journal
-    from sessionize import detect_sessions
-except ImportError:
-    from src.journalize import render_journal
-    from src.sessionize import detect_sessions
+from src.analysis.journalize import render_journal
+from src.analysis.sessionize import detect_sessions
 
 
 def read_day_events(journal_root: pathlib.Path, date: str) -> list[dict]:

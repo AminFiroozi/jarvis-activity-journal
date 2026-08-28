@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.dashboard import build_status
+from src.ops.dashboard import build_status
 
 
 class DashboardTests(unittest.TestCase):

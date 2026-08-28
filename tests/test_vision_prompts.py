@@ -3,8 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.analyze_screenshots import build_prompt, load_prompts, select_prompt_context
-from src.ocr import extract_text
+from src.analysis.analyze_screenshots import build_prompt, load_prompts, select_prompt_context
+from src.analysis.ocr import extract_text
 
 
 class VisionPromptTests(unittest.TestCase):

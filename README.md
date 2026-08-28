@@ -45,10 +45,10 @@ Edit `settings.json`: set `repositoryPath` to this repo's absolute path, `projec
 Register the scheduler for your platform:
 
 ```bash
-python -m src.install --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
+python -m src.orchestration.install --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
 ```
 
-This registers one job per collector (Task Scheduler on Windows, systemd user timers on Linux) at the intervals from your config, plus a logon-trigger startup pass and — where `lms` is on PATH — a logon-trigger vision-service pre-loader. `python -m src.uninstall` reverses it.
+This registers one job per collector (Task Scheduler on Windows, systemd user timers on Linux) at the intervals from your config, plus a logon-trigger startup pass and — where `lms` is on PATH — a logon-trigger vision-service pre-loader. `python -m src.orchestration.uninstall` reverses it.
 
 ## Choosing a model provider
 
@@ -96,64 +96,89 @@ All comfortably clear this pipeline's volume (dozens to a few hundred calls/day)
 1. Download a vision-capable model (e.g. Qwen2.5-VL) in LM Studio and start its server on `http://localhost:1234`.
 2. Find the model identifier with `lms ls --json` or `GET /v1/models`; put it in the matching `providers.*.model`.
 3. Tune `visionService.contextLength`/`.parallel` to fit available VRAM — each parallel slot allocates its own KV cache at the full context length, so `parallel: 1` with a smaller `contextLength` (e.g. 4096) is the biggest lever on constrained hardware.
-4. `src/start_vision_service.py` starts LM Studio's server and pre-loads the model at logon — `python -m src.install` registers it automatically wherever `lms` (LM Studio's own CLI, cross-platform) is on PATH, skipping silently otherwise. If you use a different local runtime (Ollama, etc.) instead of LM Studio, start it normally per its own docs — there's no equivalent for other runtimes.
+4. `src/orchestration/start_vision_service.py` starts LM Studio's server and pre-loads the model at logon — `python -m src.orchestration.install` registers it automatically wherever `lms` (LM Studio's own CLI, cross-platform) is on PATH, skipping silently otherwise. If you use a different local runtime (Ollama, etc.) instead of LM Studio, start it normally per its own docs — there's no equivalent for other runtimes.
 
 ## Pipeline
 
 ```text
 Every collectors.activity/content/screenshot.intervalSeconds (default 60s)
-  |- window_activity.py  -> app+window metadata      -> Journal/raw/activity-DATE.jsonl
-  |- active_content.py   -> focused-window text       -> Journal/raw/content-DATE.jsonl
-  `- capture.py           -> full-desktop screenshot  -> Journal/screenshots/DATE/*.jpg
-                              (skipped if perceptually identical to the previous frame)
+  |- collectors/window_activity.py  -> app+window metadata      -> Journal/raw/activity-DATE.jsonl
+  |- collectors/active_content.py   -> focused-window text       -> Journal/raw/content-DATE.jsonl
+  `- collectors/capture.py           -> full-desktop screenshot  -> Journal/screenshots/DATE/*.jpg
+                                        (skipped if perceptually identical to the previous frame)
 
 Every collectors.projectEvidence.intervalSeconds (default 15 min)
-  `- project_evidence.py -> git evidence for configured projects -> Journal/raw/activity-DATE.jsonl
+  `- collectors/project_evidence.py -> git evidence for configured projects -> Journal/raw/activity-DATE.jsonl
 
 Every screenshotAnalyzer.intervalSeconds (default 15 min)
-  `- analyze_screenshots.py -> deduped screenshots enqueued to Journal/queue/
-                               -> up to maxScreenshotsPerRun drained per run -> vision model
-                               -> Journal/raw/visual-DATE.jsonl
-                               (per-screenshot prompt picked from the app active at capture time)
+  `- analysis/analyze_screenshots.py -> deduped screenshots enqueued to Journal/queue/
+                                        -> up to maxScreenshotsPerRun drained per run -> vision model
+                                        -> Journal/raw/visual-DATE.jsonl
+                                        (per-screenshot prompt picked from the app active at capture time)
 
 Every hourlyBuild.intervalSeconds (default 1h)
-  |- build_journals.py     -> deterministic hourly + weekly Markdown (no model call)
-  |- build_llm_context.py  -> Journal/llm-context/latest.md (raw evidence feed for an LLM assistant)
-  `- synthesize_journal.py -> text model -> Journal/daily/DATE.md ("LLM narrative" section)
+  |- analysis/build_journals.py     -> deterministic hourly + weekly Markdown (no model call)
+  |- analysis/build_llm_context.py  -> Journal/llm-context/latest.md (raw evidence feed for an LLM assistant)
+  `- analysis/synthesize_journal.py -> text model -> Journal/daily/DATE.md ("LLM narrative" section)
 
 At logon
-  `- run_now.py -> one collection pass immediately
+  |- orchestration/run_now.py             -> one collection pass immediately
+  `- orchestration/start_vision_service.py -> starts and pre-loads the local model, where configured
 
 dailySummary.time (default 23:55)
-  `- daily_summary.py -> retention cleanup, final vision pass, deterministic daily scaffold, narrative refresh
+  `- orchestration/daily_summary.py -> retention cleanup, final vision pass, deterministic daily scaffold, narrative refresh
 ```
 
 On constrained hardware a single vision-analysis run over a dozen screenshots can take many minutes; every scheduled job is registered with an execution time limit and "ignore new instance" so a slow run blocks its own next trigger instead of stacking concurrent model loads.
 
 ### Durable retry queue
 
-Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.dashboard` exposes queue depth per state.
+Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/infra/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.ops.dashboard` exposes queue depth per state.
 
 ## Verification
 
 ```bash
-python -m src.run_now --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
-python -m src.daily_summary --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
-python -m src.doctor --journal-root /path/to/Journal
+python -m src.orchestration.run_now --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
+python -m src.orchestration.daily_summary --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
+python -m src.ops.doctor --journal-root /path/to/Journal
 ```
 
 Successful screenshot analysis creates `Journal/raw/visual-YYYY-MM-DD.jsonl` entries and increases "Vision-analyzed screenshots" in `Journal/llm-context/latest.md`. An HTTP error from the vision/synthesis stage means the configured provider is unreachable or misconfigured — check its status file (`Journal/raw/visual-DATE.status.json`, `Journal/raw/journal-DATE.status.json`) for the exact error.
 
 ## Repository layout
 
-- `src/capture.py`, `window_activity.py`, `active_content.py`, `project_evidence.py` — collectors, one process per run
-- `src/analyze_screenshots.py`, `synthesize_journal.py`, `model_client.py` — vision/text model calls, provider-neutral
-- `src/build_journals.py`, `build_llm_context.py`, `daily_summary.py`, `run_hourly.py`, `run_now.py` — deterministic rendering and orchestration (no model calls except where noted)
-- `src/journalize.py`, `sessionize.py` — deterministic Markdown rendering and activity-session classification
-- `src/heartbeat.py`, `privacy_state.py`, `retention.py` — shared infrastructure
-- `src/install.py`, `uninstall.py` — cross-platform scheduler registration
-- `src/doctor.py`, `dashboard.py` — diagnostics and a localhost status endpoint
-- `config/settings.example.json` — full configuration template; copy to your journal root
-- `config/prompts.json` — per-app-context vision prompts
-- `src/start_vision_service.py` — starts a local LM Studio server and pre-loads its configured model, via the cross-platform `lms` CLI
-- `LICENSE` — MIT license
+Every module here is invoked as `python -m src.<subpackage>.<name>`; nothing runs as a bare script.
+
+```text
+src/
+  collectors/       one process per run, each captures one thing
+    window_activity.py    app + window metadata, cross-platform (Windows/X11/Darwin backends)
+    active_content.py     focused-window text where the platform's accessibility API supports it
+    capture.py             full-desktop screenshot, deduped at capture time
+    project_evidence.py    git evidence for configured project paths
+  analysis/         vision/text model calls and deterministic rendering
+    analyze_screenshots.py  screenshots -> vision model -> visual-DATE.jsonl
+    synthesize_journal.py   events -> text model -> daily narrative
+    journalize.py            deterministic Markdown rendering (no model call)
+    sessionize.py            activity-session classification (no model call)
+    build_journals.py        hourly/weekly Markdown (no model call)
+    build_llm_context.py     llm-context/latest.md, raw evidence for an LLM assistant
+    ocr.py, screenshot_fingerprint.py   OCR and perceptual-hash helpers
+  providers/         model_client.py — provider-neutral OpenAI-compatible client,
+                     key/model rotation, proxy support
+  infra/             shared, dependency-free building blocks
+    heartbeat.py, privacy_state.py, retention.py, processing_queue.py
+    privacy.py, privacy_config.py     redaction/exclusion + config validation
+  orchestration/      wires the above together on a schedule
+    run_now.py, run_hourly.py, daily_summary.py, start_vision_service.py
+    install.py, uninstall.py           cross-platform scheduler registration
+  ops/                doctor.py, dashboard.py — diagnostics and a localhost status endpoint
+
+config/
+  settings.example.json   full configuration template; copy to your journal root
+  prompts.json              per-app-context vision prompts
+
+rules/                    durable project rules (see rules/README.md)
+tests/                    one test module per src module, same flat layout
+LICENSE                    MIT license
+```
