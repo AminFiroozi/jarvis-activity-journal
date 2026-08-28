@@ -66,6 +66,89 @@ class VaultLinkerTests(unittest.TestCase):
 
         self.assertEqual(result, "[[DariushSeif|DARIUSH]] called.")
 
+    def test_inject_links_omits_alias_when_word_matches_base_name_exactly(self):
+        index = {"docker": ["Docker"]}
+
+        result = inject_links("Docker is great.", index)
+
+        self.assertEqual(result, "[[Docker]] is great.")
+
+    def test_inject_links_keeps_alias_when_word_differs_from_base_name(self):
+        index = {"dariush": ["DariushSeif"]}
+
+        result = inject_links("dariush called.", index)
+
+        self.assertEqual(result, "[[DariushSeif|dariush]] called.")
+
+    def test_build_name_index_keeps_multiword_stem_as_single_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skills = root / "Skills"
+            skills.mkdir()
+            (skills / "Data Structure and Algorithms.md").write_text("", encoding="utf-8")
+
+            index = build_name_index(root)
+
+            self.assertEqual(
+                index["data structure and algorithms"],
+                ["Data Structure and Algorithms"],
+            )
+            self.assertIsNone(index.get("and"))
+            self.assertIsNone(index.get("data"))
+
+    def test_build_name_index_keeps_hyphenated_stem_as_single_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "Projects"
+            projects.mkdir()
+            (projects / "HW1-notebook-grading.md").write_text("", encoding="utf-8")
+
+            index = build_name_index(root)
+
+            self.assertEqual(index["hw1-notebook-grading"], ["HW1-notebook-grading"])
+            self.assertIsNone(index.get("notebook"))
+
+    def test_build_name_index_keeps_underscored_stem_as_single_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "Projects"
+            projects.mkdir()
+            (projects / "Mahoura_Frontend_Index.md").write_text("", encoding="utf-8")
+
+            index = build_name_index(root)
+
+            self.assertEqual(index["mahoura_frontend_index"], ["Mahoura_Frontend_Index"])
+            self.assertIsNone(index.get("index"))
+
+    def test_build_name_index_drops_short_pascal_case_fragments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            projects = root / "Projects"
+            projects.mkdir()
+            (projects / "BargheNo.md").write_text("", encoding="utf-8")
+
+            index = build_name_index(root)
+
+            self.assertEqual(index["barghe"], ["BargheNo"])
+            self.assertEqual(index["bargheno"], ["BargheNo"])
+            self.assertIsNone(index.get("no"))
+
+    def test_build_name_index_skips_people_history_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            history = root / "People" / "History"
+            history.mkdir(parents=True)
+            (history / "SomeName - 2025-01.md").write_text("", encoding="utf-8")
+            friends = root / "People" / "Friends"
+            friends.mkdir(parents=True)
+            (friends / "SomeName.md").write_text("", encoding="utf-8")
+
+            index = build_name_index(root)
+
+            all_names = [name for names in index.values() for name in names]
+            self.assertNotIn("SomeName - 2025-01", all_names)
+            self.assertIn("SomeName", index["somename"])
+
 
 if __name__ == "__main__":
     unittest.main()
