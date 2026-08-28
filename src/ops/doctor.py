@@ -57,6 +57,16 @@ def run_local_checks(root: Path, minimum_free_bytes: int = 1_000_000_000) -> lis
             f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         )
     )
+    failed_queue_dir = root / "queue" / "failed"
+    failed_count = len(list(failed_queue_dir.glob("*.json"))) if failed_queue_dir.exists() else 0
+    checks.append(
+        _check(
+            "queue-failed",
+            failed_count == 0,
+            f"{failed_count} screenshot(s) gave up after repeated failures" if failed_count else "no dead-lettered jobs",
+            required=False,
+        )
+    )
     return checks
 
 
