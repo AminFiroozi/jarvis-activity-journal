@@ -5,8 +5,12 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import pathlib
+import re
 
 from src.orchestration.vault_linker import build_name_index, inject_links
+
+_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_NARRATIVE_MARKER = "## LLM narrative"
 
 
 def render_vault_note(date: str, content: str) -> str:
@@ -15,12 +19,20 @@ def render_vault_note(date: str, content: str) -> str:
 
 
 def sync_day(journal_root: pathlib.Path, vault_root: pathlib.Path, date: str) -> pathlib.Path | None:
+    if not _DATE_PATTERN.match(date):
+        return None
     source = journal_root / "daily" / f"{date}.md"
     if not source.exists():
         return None
     content = source.read_text(encoding="utf-8")
-    index = build_name_index(vault_root)
-    linked = inject_links(content, index)
+    marker_index = content.find(_NARRATIVE_MARKER)
+    if marker_index == -1:
+        linked = content
+    else:
+        prefix = content[:marker_index]
+        narrative = content[marker_index:]
+        index = build_name_index(vault_root)
+        linked = prefix + inject_links(narrative, index)
     note = render_vault_note(date, linked)
     target = vault_root / "Journal" / "Daily" / f"{date}.md"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -40,7 +52,7 @@ def main() -> int:
     args = parse_args()
     try:
         result = sync_day(args.journal_root, args.vault_root, args.date)
-    except OSError as error:
+    except Exception as error:
         print(f"Vault sync failed: {error}")
         return 0
     if result is None:
