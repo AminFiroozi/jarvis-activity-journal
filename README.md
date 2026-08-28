@@ -48,9 +48,7 @@ Register the scheduler for your platform:
 python -m src.install --journal-root /path/to/Journal --config /path/to/Journal/config/settings.json
 ```
 
-This registers one job per collector (Task Scheduler on Windows, systemd user timers on Linux) at the intervals from your config, plus a logon/startup pass. `python -m src.uninstall` reverses it.
-
-On some Windows configurations, registering the logon-trigger startup task fails with "Access is denied" from a non-elevated shell (a Task Scheduler quirk specific to `LogonTrigger`) while every interval-based task registers fine. The installer reports this and continues rather than aborting — the recurring tasks alone start collecting within minutes of any logon regardless, so the startup task is a minor convenience, not a requirement. Run the installer from an elevated PowerShell if you want it registered too.
+This registers one job per collector (Task Scheduler on Windows, systemd user timers on Linux) at the intervals from your config, plus a logon-trigger startup pass and — where `lms` is on PATH — a logon-trigger vision-service pre-loader. `python -m src.uninstall` reverses it.
 
 ## Choosing a model provider
 
@@ -90,7 +88,7 @@ All comfortably clear this pipeline's volume (dozens to a few hundred calls/day)
 1. Download a vision-capable model (e.g. Qwen2.5-VL) in LM Studio and start its server on `http://localhost:1234`.
 2. Find the model identifier with `lms ls --json` or `GET /v1/models`; put it in the matching `providers.*.model`.
 3. Tune `visionService.contextLength`/`.parallel` to fit available VRAM — each parallel slot allocates its own KV cache at the full context length, so `parallel: 1` with a smaller `contextLength` (e.g. 4096) is the biggest lever on constrained hardware.
-4. `scripts/windows/Start-VisionService.ps1` is an optional Windows-only helper that starts LM Studio's server and pre-loads the model at logon; `python -m src.install` does not require it, but registering it avoids paying model-load time on the first request. There is no equivalent script here for other local runtimes (Ollama, etc.) — start those normally per their own docs.
+4. `src/start_vision_service.py` starts LM Studio's server and pre-loads the model at logon — `python -m src.install` registers it automatically wherever `lms` (LM Studio's own CLI, cross-platform) is on PATH, skipping silently otherwise. If you use a different local runtime (Ollama, etc.) instead of LM Studio, start it normally per its own docs — there's no equivalent for other runtimes.
 
 ## Pipeline
 
@@ -149,5 +147,5 @@ Successful screenshot analysis creates `Journal/raw/visual-YYYY-MM-DD.jsonl` ent
 - `src/doctor.py`, `dashboard.py` — diagnostics and a localhost status endpoint
 - `config/settings.example.json` — full configuration template; copy to your journal root
 - `config/prompts.json` — per-app-context vision prompts
-- `scripts/windows/Start-VisionService.ps1` — optional Windows-only LM Studio pre-loader
+- `src/start_vision_service.py` — starts a local LM Studio server and pre-loads its configured model, via the cross-platform `lms` CLI
 - `LICENSE` — MIT license

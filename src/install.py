@@ -25,6 +25,7 @@ INTERVAL_JOBS = [
 ]
 DAILY_JOB = ("daily-summary", "src.daily_summary", ("dailySummary", "time"), "23:55", 40)
 LOGON_JOB = ("startup", "src.run_now")
+VISION_SERVICE_JOB = ("vision-service", "src.start_vision_service")
 
 TASK_PREFIX = "Jarvis Activity Journal"
 
@@ -43,13 +44,17 @@ def _pythonw() -> str:
     return str(candidate) if candidate.exists() else sys.executable
 
 
+def _current_user_id() -> str:
+    domain = __import__("os").environ.get("USERDOMAIN", platform.node())
+    return f"{domain}\\{getpass.getuser()}"
+
+
 def _module_args(journal_root: pathlib.Path, config_path: pathlib.Path, module: str) -> str:
     return f'-m {module} --journal-root "{journal_root}" --config "{config_path}"'
 
 
 def _windows_task_xml(command: str, arguments: str, trigger_xml: str, time_limit_minutes: int) -> str:
-    domain = __import__("os").environ.get("USERDOMAIN", platform.node())
-    user = f"{domain}\\{getpass.getuser()}"
+    user = _current_user_id()
     return f"""<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <Triggers>
@@ -117,9 +122,9 @@ def install_windows(journal_root: pathlib.Path, config_path: pathlib.Path, confi
     </CalendarTrigger>"""
     all_ok &= _register_windows_task(f"{TASK_PREFIX} - {name}", pythonw, _module_args(journal_root, config_path, module), trigger, time_limit)
 
-    name, module = LOGON_JOB
-    trigger = "<LogonTrigger><Enabled>true</Enabled></LogonTrigger>"
-    all_ok &= _register_windows_task(f"{TASK_PREFIX} - {name}", pythonw, _module_args(journal_root, config_path, module), trigger, 5)
+    logon_trigger = f"<LogonTrigger><UserId>{escape(_current_user_id())}</UserId><Enabled>true</Enabled></LogonTrigger>"
+    for name, module in (LOGON_JOB, VISION_SERVICE_JOB):
+        all_ok &= _register_windows_task(f"{TASK_PREFIX} - {name}", pythonw, _module_args(journal_root, config_path, module), logon_trigger, 5)
 
     print("Installed scheduled tasks:")
     result = subprocess.run(["schtasks", "/Query", "/FO", "CSV"], capture_output=True, text=True)
@@ -169,10 +174,10 @@ def install_linux(journal_root: pathlib.Path, config_path: pathlib.Path, config:
     time_value = str(_get(config, path, default))
     _write_systemd_unit(name, module, journal_root, config_path, f"OnCalendar=*-*-* {time_value}:00", time_limit)
 
-    name, module = LOGON_JOB
     unit_dir = _systemd_dir()
     unit_dir.mkdir(parents=True, exist_ok=True)
-    startup_service = f"""[Unit]
+    for name, module in (LOGON_JOB, VISION_SERVICE_JOB):
+        logon_service = f"""[Unit]
 Description={TASK_PREFIX} - {name}
 
 [Service]
@@ -183,12 +188,13 @@ ExecStart={sys.executable} -m {module} --journal-root {journal_root} --config {c
 [Install]
 WantedBy=default.target
 """
-    (unit_dir / "jarvis-startup.service").write_text(startup_service, encoding="utf-8")
+        (unit_dir / f"jarvis-{name}.service").write_text(logon_service, encoding="utf-8")
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     for job_name, *_ in INTERVAL_JOBS + [DAILY_JOB]:
         subprocess.run(["systemctl", "--user", "enable", "--now", f"jarvis-{job_name}.timer"], check=True)
-    subprocess.run(["systemctl", "--user", "enable", "--now", "jarvis-startup.service"], check=True)
+    for name, _module in (LOGON_JOB, VISION_SERVICE_JOB):
+        subprocess.run(["systemctl", "--user", "enable", "--now", f"jarvis-{name}.service"], check=True)
 
     print("Installed systemd user timers under ~/.config/systemd/user/.")
     print("If this machine reboots without you logging in, run: loginctl enable-linger " + getpass.getuser())
