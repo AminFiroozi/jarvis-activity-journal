@@ -38,8 +38,14 @@ def _duration_label(start: str | None, end: str | None) -> str:
 
 def _event_kind_and_app(event: dict[str, Any]) -> tuple[str, str]:
     kind = event.get("kind") or event.get("source") or "activity"
-    application = event.get("application") or event.get("process") or "unknown"
-    return _KIND_LABELS.get(kind, kind), application
+    application = event.get("application") or event.get("process")
+    if not application and kind == "screenshot-vision":
+        applications = (event.get("analysis") or {}).get("applications")
+        if isinstance(applications, list) and applications:
+            application = ", ".join(str(item) for item in applications)
+        elif isinstance(applications, str) and applications:
+            application = applications
+    return _KIND_LABELS.get(kind, kind), application or "unknown"
 
 
 def _event_time(event: dict[str, Any]) -> str | None:
