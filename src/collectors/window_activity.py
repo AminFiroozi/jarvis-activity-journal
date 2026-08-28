@@ -15,12 +15,8 @@ import shutil
 import subprocess
 import sys
 
-try:
-    from heartbeat import write_heartbeat
-    from privacy_state import is_private_mode
-except ImportError:
-    from src.heartbeat import write_heartbeat
-    from src.privacy_state import is_private_mode
+from src.infra.heartbeat import write_heartbeat
+from src.infra.privacy_state import is_private_mode
 
 _warned_unsupported = False
 

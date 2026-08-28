@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from src.screenshot_fingerprint import deduplicate_images, fingerprint_image, hamming_distance
+from src.analysis.screenshot_fingerprint import deduplicate_images, fingerprint_image, hamming_distance
 
 
 class ScreenshotFingerprintTests(unittest.TestCase):

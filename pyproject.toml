@@ -1,6 +1,6 @@
 [project]
 name = "jarvis-activity-journal"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first, cross-platform activity collection and journal generation."
 requires-python = ">=3.10"
 dependencies = [

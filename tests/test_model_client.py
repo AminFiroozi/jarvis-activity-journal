@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest import mock
 
-from src.model_client import ProviderError, call_chat_completions, resolve_provider
+from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 
 
 class ResolveProviderTests(unittest.TestCase):
@@ -91,7 +91,7 @@ class CallChatCompletionsRotationTests(unittest.TestCase):
                 raise self._http_error(429)
             return self._fake_response({"choices": [{"message": {"content": "ok"}}]})
 
-        with mock.patch("src.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.model_client.time.sleep") as sleep_mock:
+        with mock.patch("src.providers.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.providers.model_client.time.sleep") as sleep_mock:
             result = call_chat_completions(provider, [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "ok")
@@ -108,7 +108,7 @@ class CallChatCompletionsRotationTests(unittest.TestCase):
                 raise self._http_error(429)
             return self._fake_response({"choices": [{"message": {"content": "ok"}}]})
 
-        with mock.patch("src.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.model_client.time.sleep") as sleep_mock:
+        with mock.patch("src.providers.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.providers.model_client.time.sleep") as sleep_mock:
             result = call_chat_completions(provider, [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "ok")
@@ -130,7 +130,7 @@ class CallChatCompletionsRotationTests(unittest.TestCase):
                 raise self._http_error(429)
             return self._fake_response({"choices": [{"message": {"content": "ok"}}]})
 
-        with mock.patch("src.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.model_client.time.sleep") as sleep_mock:
+        with mock.patch("src.providers.model_client.urllib.request.urlopen", side_effect=fake_open), mock.patch("src.providers.model_client.time.sleep") as sleep_mock:
             result = call_chat_completions(provider, [{"role": "user", "content": "hi"}])
 
         self.assertEqual(result, "ok")

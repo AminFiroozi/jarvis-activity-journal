@@ -17,13 +17,13 @@ def main() -> int:
     args = parser.parse_args()
 
     steps = [
-        [sys.executable, "-m", "src.build_journals", "--journal-root", str(args.journal_root), "--date", args.date],
-        [sys.executable, "-m", "src.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date],
-        [sys.executable, "-m", "src.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date],
+        [sys.executable, "-m", "src.analysis.build_journals", "--journal-root", str(args.journal_root), "--date", args.date],
+        [sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date],
+        [sys.executable, "-m", "src.analysis.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date],
     ]
     exit_code = 0
     for step in steps:
-        result = subprocess.run(step, cwd=pathlib.Path(__file__).parents[1])
+        result = subprocess.run(step, cwd=pathlib.Path(__file__).parents[2])
         exit_code = exit_code or result.returncode
     return exit_code
 

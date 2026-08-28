@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.privacy_state import is_private_mode, set_private_mode
+from src.infra.privacy_state import is_private_mode, set_private_mode
 
 
 class PrivacyStateTests(unittest.TestCase):

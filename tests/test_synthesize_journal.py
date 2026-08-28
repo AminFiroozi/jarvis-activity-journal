@@ -1,10 +1,6 @@
-import sys
 import unittest
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
-
-from synthesize_journal import parse_model_json, upsert_narrative
+from src.analysis.synthesize_journal import parse_model_json, upsert_narrative
 
 
 class SynthesisTests(unittest.TestCase):

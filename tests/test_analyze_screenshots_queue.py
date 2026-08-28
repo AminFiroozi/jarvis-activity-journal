@@ -6,7 +6,7 @@ from unittest import mock
 
 from PIL import Image
 
-from src import analyze_screenshots as module
+from src.analysis import analyze_screenshots as module
 
 
 def _make_journal(directory: Path) -> Path:
@@ -52,7 +52,7 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             with mock.patch.object(module, "call_vision", side_effect=ValueError("model unavailable")):
                 _run(journal)
 
-            from src.processing_queue import FileJobQueue
+            from src.infra.processing_queue import FileJobQueue
 
             queue = FileJobQueue(journal / "queue")
             pending = list((queue.root / "pending").glob("*.json"))
@@ -68,7 +68,7 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
                 _run(journal)
                 _run(journal)
 
-            from src.processing_queue import FileJobQueue
+            from src.infra.processing_queue import FileJobQueue
 
             queue = FileJobQueue(journal / "queue")
             failed = list((queue.root / "failed").glob("*.json"))
@@ -89,7 +89,7 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             self.assertEqual(len(lines), 1)
             self.assertEqual(json.loads(lines[0])["analysis"]["summary"], "coding")
 
-            from src.processing_queue import FileJobQueue
+            from src.infra.processing_queue import FileJobQueue
 
             queue = FileJobQueue(journal / "queue")
             self.assertEqual(len(list((queue.root / "completed").glob("*.json"))), 1)

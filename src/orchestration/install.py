@@ -13,19 +13,19 @@ import subprocess
 import sys
 from xml.sax.saxutils import escape
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 INTERVAL_JOBS = [
-    ("activity", "src.window_activity", ("collectors", "activity", "intervalSeconds"), 60, 2),
-    ("content", "src.active_content", ("collectors", "content", "intervalSeconds"), 60, 2),
-    ("screenshot", "src.capture", ("collectors", "screenshot", "intervalSeconds"), 60, 2),
-    ("project-evidence", "src.project_evidence", ("collectors", "projectEvidence", "intervalSeconds"), 900, 5),
-    ("vision-analysis", "src.analyze_screenshots", ("screenshotAnalyzer", "intervalSeconds"), 900, 40),
-    ("hourly", "src.run_hourly", ("hourlyBuild", "intervalSeconds"), 3600, 40),
+    ("activity", "src.collectors.window_activity", ("collectors", "activity", "intervalSeconds"), 60, 2),
+    ("content", "src.collectors.active_content", ("collectors", "content", "intervalSeconds"), 60, 2),
+    ("screenshot", "src.collectors.capture", ("collectors", "screenshot", "intervalSeconds"), 60, 2),
+    ("project-evidence", "src.collectors.project_evidence", ("collectors", "projectEvidence", "intervalSeconds"), 900, 5),
+    ("vision-analysis", "src.analysis.analyze_screenshots", ("screenshotAnalyzer", "intervalSeconds"), 900, 40),
+    ("hourly", "src.orchestration.run_hourly", ("hourlyBuild", "intervalSeconds"), 3600, 40),
 ]
-DAILY_JOB = ("daily-summary", "src.daily_summary", ("dailySummary", "time"), "23:55", 40)
-LOGON_JOB = ("startup", "src.run_now")
-VISION_SERVICE_JOB = ("vision-service", "src.start_vision_service")
+DAILY_JOB = ("daily-summary", "src.orchestration.daily_summary", ("dailySummary", "time"), "23:55", 40)
+LOGON_JOB = ("startup", "src.orchestration.run_now")
+VISION_SERVICE_JOB = ("vision-service", "src.orchestration.start_vision_service")
 
 TASK_PREFIX = "Jarvis Activity Journal"
 
@@ -219,7 +219,7 @@ def main() -> int:
         return 0
     print(f"Automatic scheduling is not implemented for {system!r} yet.")
     print("Run the collectors manually, e.g.:")
-    print(f"  {sys.executable} -m src.run_now --journal-root {args.journal_root} --config {args.config}")
+    print(f"  {sys.executable} -m src.orchestration.run_now --journal-root {args.journal_root} --config {args.config}")
     return 1
 
 

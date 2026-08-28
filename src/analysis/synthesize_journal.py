@@ -8,10 +8,7 @@ import datetime as dt
 import json
 import pathlib
 
-try:
-    from model_client import ProviderError, call_chat_completions, resolve_provider
-except ImportError:
-    from src.model_client import ProviderError, call_chat_completions, resolve_provider
+from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 
 
 PROMPT = """You are writing a factual personal activity journal from observed computer events.

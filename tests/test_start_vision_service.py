@@ -1,6 +1,6 @@
 import unittest
 
-from src.start_vision_service import find_model_key
+from src.orchestration.start_vision_service import find_model_key
 
 SAMPLE = (
     '[{"type":"llm","modelKey":"qwen/qwen3-vl-8b","format":"gguf","displayName":"Qwen3 VL 8B",'

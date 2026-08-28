@@ -11,14 +11,9 @@ import mss
 import mss.tools
 from PIL import Image
 
-try:
-    from heartbeat import write_heartbeat
-    from privacy_state import is_private_mode
-    from screenshot_fingerprint import hamming_distance
-except ImportError:
-    from src.heartbeat import write_heartbeat
-    from src.privacy_state import is_private_mode
-    from src.screenshot_fingerprint import hamming_distance
+from src.infra.heartbeat import write_heartbeat
+from src.infra.privacy_state import is_private_mode
+from src.analysis.screenshot_fingerprint import hamming_distance
 
 
 def compute_hash(image: Image.Image) -> str:

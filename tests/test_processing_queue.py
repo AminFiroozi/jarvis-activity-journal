@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.processing_queue import FileJobQueue
+from src.infra.processing_queue import FileJobQueue
 
 
 class ProcessingQueueTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.build_llm_context import render
+from src.analysis.build_llm_context import render
 
 
 class RenderLlmContextTests(unittest.TestCase):

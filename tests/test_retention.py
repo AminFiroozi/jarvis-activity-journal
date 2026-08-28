@@ -4,7 +4,7 @@ import time
 import unittest
 from pathlib import Path
 
-from src.retention import run_retention
+from src.infra.retention import run_retention
 
 
 class RetentionTests(unittest.TestCase):

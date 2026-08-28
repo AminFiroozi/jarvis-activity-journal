@@ -1,6 +1,6 @@
 import unittest
 
-from src.privacy_config import DEFAULT_PRIVACY_CONFIG, load_privacy_config
+from src.infra.privacy_config import DEFAULT_PRIVACY_CONFIG, load_privacy_config
 
 
 class PrivacyConfigTests(unittest.TestCase):

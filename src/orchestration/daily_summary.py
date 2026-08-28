@@ -81,15 +81,15 @@ def main() -> int:
     parser.add_argument("--date", default=dt.date.today().isoformat())
     args = parser.parse_args()
 
-    subprocess.run([sys.executable, "-m", "src.retention", "--journal-root", str(args.journal_root), "--config", str(args.config)], cwd=pathlib.Path(__file__).parents[1])
-    subprocess.run([sys.executable, "-m", "src.analyze_screenshots", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[1])
+    subprocess.run([sys.executable, "-m", "src.infra.retention", "--journal-root", str(args.journal_root), "--config", str(args.config)], cwd=pathlib.Path(__file__).parents[2])
+    subprocess.run([sys.executable, "-m", "src.analysis.analyze_screenshots", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
 
     daily_path = args.journal_root / "daily" / f"{args.date}.md"
     daily_path.parent.mkdir(parents=True, exist_ok=True)
     daily_path.write_text(render_daily_scaffold(args.journal_root, args.date), encoding="utf-8")
 
-    subprocess.run([sys.executable, "-m", "src.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[1])
-    result = subprocess.run([sys.executable, "-m", "src.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[1])
+    subprocess.run([sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
+    result = subprocess.run([sys.executable, "-m", "src.analysis.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
     print(str(daily_path))
     return result.returncode
 

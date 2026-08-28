@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.doctor import doctor_exit_code, run_local_checks
+from src.ops.doctor import doctor_exit_code, run_local_checks
 
 
 class DoctorTests(unittest.TestCase):

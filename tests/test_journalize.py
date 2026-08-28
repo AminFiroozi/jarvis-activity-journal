@@ -2,7 +2,7 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from src.journalize import render_journal, write_journal_documents
+from src.analysis.journalize import render_journal, write_journal_documents
 
 
 class JournalizeTests(unittest.TestCase):

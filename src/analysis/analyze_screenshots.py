@@ -11,19 +11,13 @@ import hashlib
 import json
 import pathlib
 
-try:
-    from model_client import ProviderError, call_chat_completions, resolve_provider
-    from ocr import extract_text
-    from processing_queue import FileJobQueue
-    from screenshot_fingerprint import deduplicate_images
-except ImportError:  # Supports importing as ``src.analyze_screenshots`` in tests.
-    from src.model_client import ProviderError, call_chat_completions, resolve_provider
-    from src.ocr import extract_text
-    from src.processing_queue import FileJobQueue
-    from src.screenshot_fingerprint import deduplicate_images
+from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
+from src.analysis.ocr import extract_text
+from src.infra.processing_queue import FileJobQueue
+from src.analysis.screenshot_fingerprint import deduplicate_images
 
 
-DEFAULT_PROMPTS = pathlib.Path(__file__).parents[1] / "config" / "prompts.json"
+DEFAULT_PROMPTS = pathlib.Path(__file__).parents[2] / "config" / "prompts.json"
 
 _CONTEXT_APP_HINTS = {
     "terminal": ("powershell", "pwsh", "cmd", "windowsterminal", "conhost", "bash", "wt", "wsl", "termius", "putty"),

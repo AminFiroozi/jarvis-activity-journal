@@ -14,10 +14,10 @@ def main() -> int:
     parser.add_argument("--config", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    repo_root = pathlib.Path(__file__).parents[1]
-    for module in ("src.window_activity", "src.project_evidence", "src.active_content", "src.capture"):
+    repo_root = pathlib.Path(__file__).parents[2]
+    for module in ("src.collectors.window_activity", "src.collectors.project_evidence", "src.collectors.active_content", "src.collectors.capture"):
         subprocess.run([sys.executable, "-m", module, "--journal-root", str(args.journal_root), "--config", str(args.config)], cwd=repo_root)
-    subprocess.run([sys.executable, "-m", "src.build_llm_context", "--journal-root", str(args.journal_root)], cwd=repo_root)
+    subprocess.run([sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root)], cwd=repo_root)
     print("Activity journal collection completed.")
     return 0
 
