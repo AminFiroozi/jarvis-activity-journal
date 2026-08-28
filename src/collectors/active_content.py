@@ -17,6 +17,7 @@ import sys
 
 from src.infra.heartbeat import write_heartbeat
 from src.infra.privacy import is_excluded, redact_text
+from src.infra.privacy_config import load_privacy_config
 from src.infra.privacy_state import is_private_mode
 
 _warned_unsupported = False
@@ -107,7 +108,7 @@ def main() -> int:
     content_config = (config.get("collectors") or {}).get("content") or {}
     if not content_config.get("enabled", True):
         return 0
-    privacy = config.get("privacy") or {}
+    privacy = load_privacy_config(config)
     if privacy.get("captureEnabled") is False:
         return 0
 
