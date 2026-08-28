@@ -6,3 +6,5 @@ Journal/
 raw/
 screenshots/
 *.jsonl
+
+.worktrees/
