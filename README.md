@@ -40,7 +40,7 @@ pip install -e ".[dev]"          # add [linux] on Linux, [windows] or [macos] as
 cp config/settings.example.json /path/to/Journal/config/settings.json
 ```
 
-Edit `settings.json`: set `repositoryPath` to this repo's absolute path, `projectPaths` to the git repos you want evidence from, and review the `privacy` block before enabling capture. Every interval (`collectors.*.intervalSeconds`, `screenshotAnalyzer.intervalSeconds`, `hourlyBuild.intervalSeconds`, `dailySummary.time`) is config-driven — change the numbers, no code edits needed.
+Edit `settings.json`: set `repositoryPath` to this repo's absolute path, `projectPaths` to the git repos you want evidence from, and review the `privacy` block before enabling capture. Every interval (`collectors.*.intervalSeconds`, `screenshotAnalyzer.intervalSeconds`, `hourlyBuild.intervalSeconds`, `dailySummary.time`) is config-driven — change the numbers, no code edits needed. And set `vaultRoot` to your Obsidian vault's absolute path if you want the daily journal mirrored there (leave unset to disable).
 
 Register the scheduler for your platform:
 
