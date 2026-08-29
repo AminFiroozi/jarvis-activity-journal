@@ -90,6 +90,15 @@ def main() -> int:
 
     subprocess.run([sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
     result = subprocess.run([sys.executable, "-m", "src.analysis.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
+
+    try:
+        config = json.loads(args.config.read_text(encoding="utf-8"))
+        vault_root = config.get("vaultRoot")
+    except (OSError, json.JSONDecodeError):
+        vault_root = None
+    if vault_root:
+        subprocess.run([sys.executable, "-m", "src.orchestration.sync_vault", "--journal-root", str(args.journal_root), "--vault-root", str(vault_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
+
     print(str(daily_path))
     return result.returncode
 
