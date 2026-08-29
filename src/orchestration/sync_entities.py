@@ -17,15 +17,28 @@ _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _CATEGORY_ROOTS = {"people": "People", "projects": "Projects"}
 
 
-def _filter_by_category(paths: list[pathlib.Path], category: str) -> list[pathlib.Path]:
+def _filter_by_category(paths: list[pathlib.Path], category: str, vault_root: pathlib.Path) -> list[pathlib.Path]:
     root_name = _CATEGORY_ROOTS[category]
-    return [path for path in paths if root_name in path.parts]
+    matches = []
+    for path in paths:
+        try:
+            relative = path.relative_to(vault_root)
+        except ValueError:
+            continue
+        if relative.parts and relative.parts[0] == root_name:
+            matches.append(path)
+    return matches
 
 
-def _resolve_candidates(candidates: list[str] | None, note_paths: dict[str, list[pathlib.Path]], category: str) -> pathlib.Path | None:
+def _resolve_candidates(
+    candidates: list[str] | None,
+    note_paths: dict[str, list[pathlib.Path]],
+    category: str,
+    vault_root: pathlib.Path,
+) -> pathlib.Path | None:
     if not candidates or len(candidates) != 1:
         return None
-    matches = _filter_by_category(note_paths.get(candidates[0], []), category)
+    matches = _filter_by_category(note_paths.get(candidates[0], []), category, vault_root)
     return matches[0] if len(matches) == 1 else None
 
 
@@ -34,24 +47,27 @@ def resolve_note_name(
     index: dict[str, list[str]],
     note_paths: dict[str, list[pathlib.Path]],
     category: str,
+    vault_root: pathlib.Path,
 ) -> pathlib.Path | None:
     name = " ".join(str(proposed).split()).strip()
     if not name:
         return None
     lowered = name.lower()
 
-    for stem, paths in note_paths.items():
-        if stem.lower() == lowered:
-            matches = _filter_by_category(paths, category)
-            return matches[0] if len(matches) == 1 else None
+    stem_matches = [stem for stem in note_paths if stem.lower() == lowered]
+    if stem_matches:
+        if len(stem_matches) != 1:
+            return None
+        matches = _filter_by_category(note_paths[stem_matches[0]], category, vault_root)
+        return matches[0] if len(matches) == 1 else None
 
-    resolved = _resolve_candidates(index.get(lowered), note_paths, category)
+    resolved = _resolve_candidates(index.get(lowered), note_paths, category, vault_root)
     if resolved is not None:
         return resolved
 
     stripped = re.sub(r"[ _-]", "", name).lower()
     if stripped != lowered:
-        resolved = _resolve_candidates(index.get(stripped), note_paths, category)
+        resolved = _resolve_candidates(index.get(stripped), note_paths, category, vault_root)
         if resolved is not None:
             return resolved
 
@@ -60,7 +76,7 @@ def resolve_note_name(
         candidate_sets = [set(index.get(word, [])) for word in words]
         if all(candidate_sets):
             intersection = sorted(set.intersection(*candidate_sets))
-            resolved = _resolve_candidates(intersection, note_paths, category)
+            resolved = _resolve_candidates(intersection, note_paths, category, vault_root)
             if resolved is not None:
                 return resolved
 
@@ -115,8 +131,8 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
     note_paths = build_note_paths(vault_root)
     index = build_name_index(vault_root)
     roster = {
-        "people": sorted({stem for stem, paths in note_paths.items() if _filter_by_category(paths, "people")}),
-        "projects": sorted({stem for stem, paths in note_paths.items() if _filter_by_category(paths, "projects")}),
+        "people": sorted({stem for stem, paths in note_paths.items() if _filter_by_category(paths, "people", vault_root)}),
+        "projects": sorted({stem for stem, paths in note_paths.items() if _filter_by_category(paths, "projects", vault_root)}),
     }
 
     evidence = build_evidence(journal_root, date, roster)
@@ -139,7 +155,7 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
             if entry["confidence"] < min_confidence:
                 skipped.append({"name": entry["name"], "category": category, "reason": "below-min-confidence"})
                 continue
-            note_path = resolve_note_name(entry["name"], index, note_paths, category)
+            note_path = resolve_note_name(entry["name"], index, note_paths, category, vault_root)
             if note_path is None:
                 skipped.append({"name": entry["name"], "category": category, "reason": "unresolved-or-ambiguous"})
                 continue
@@ -176,6 +192,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _write_heartbeat_safely(journal_root: pathlib.Path, service: str, status: str, **kwargs) -> None:
+    try:
+        write_heartbeat(journal_root, service, status, **kwargs)
+    except Exception:  # heartbeat failure must never crash main()
+        pass
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -186,11 +209,11 @@ def main() -> int:
     try:
         result = sync_entities(args.journal_root, args.vault_root, config, args.date, dry_run=args.dry_run)
     except Exception as error:  # sync must never fail the nightly pipeline
-        write_heartbeat(args.journal_root, "entity-updates", "failed", error_message=str(error))
+        _write_heartbeat_safely(args.journal_root, "entity-updates", "failed", error_message=str(error))
         print(f"Entity sync failed: {error}")
         return 0
     if result.get("status") == "complete":
-        write_heartbeat(args.journal_root, "entity-updates", "success", items_processed=len(result.get("written", [])))
+        _write_heartbeat_safely(args.journal_root, "entity-updates", "success", items_processed=len(result.get("written", [])))
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

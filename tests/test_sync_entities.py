@@ -41,32 +41,66 @@ class ResolveNoteNameTests(unittest.TestCase):
         self.directory.cleanup()
 
     def test_resolves_exact_stem(self):
-        result = resolve_note_name("DariushSeif", self.index, self.note_paths, "people")
+        result = resolve_note_name("DariushSeif", self.index, self.note_paths, "people", self.root)
         self.assertEqual(result.stem, "DariushSeif")
 
     def test_resolves_single_token(self):
-        result = resolve_note_name("Dariush", self.index, self.note_paths, "people")
+        result = resolve_note_name("Dariush", self.index, self.note_paths, "people", self.root)
         self.assertEqual(result.stem, "DariushSeif")
 
     def test_resolves_separator_stripped_name(self):
-        result = resolve_note_name("Dariush Seif", self.index, self.note_paths, "people")
+        result = resolve_note_name("Dariush Seif", self.index, self.note_paths, "people", self.root)
         self.assertEqual(result.stem, "DariushSeif")
 
     def test_drops_ambiguous_shared_first_name(self):
-        result = resolve_note_name("Erfan", self.index, self.note_paths, "people")
+        result = resolve_note_name("Erfan", self.index, self.note_paths, "people", self.root)
         self.assertIsNone(result)
 
     def test_drops_unknown_name(self):
-        result = resolve_note_name("SomeoneNotInTheVault", self.index, self.note_paths, "people")
+        result = resolve_note_name("SomeoneNotInTheVault", self.index, self.note_paths, "people", self.root)
         self.assertIsNone(result)
 
     def test_drops_category_mismatch(self):
-        result = resolve_note_name("Python", self.index, self.note_paths, "projects")
+        result = resolve_note_name("Python", self.index, self.note_paths, "projects", self.root)
         self.assertIsNone(result)
 
     def test_person_never_resolves_under_projects(self):
-        result = resolve_note_name("Mahoura", self.index, self.note_paths, "people")
+        result = resolve_note_name("Mahoura", self.index, self.note_paths, "people", self.root)
         self.assertIsNone(result)
+
+    def test_drops_case_insensitive_stem_collision_across_subdirectories(self):
+        (self.root / "People" / "Friends" / "Kian.md").write_text("", encoding="utf-8")
+        uni = self.root / "People" / "Uni"
+        uni.mkdir()
+        (uni / "kian.md").write_text("", encoding="utf-8")
+        index = build_name_index(self.root)
+        note_paths = build_note_paths(self.root)
+        result = resolve_note_name("kian", index, note_paths, "people", self.root)
+        self.assertIsNone(result)
+
+
+class CategoryGateAncestorDirectoryTests(unittest.TestCase):
+    def test_vault_under_a_projects_named_ancestor_does_not_leak_category(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vault_root = Path(directory) / "Projects" / "vault"
+            _make_vault(vault_root)
+            index = build_name_index(vault_root)
+            note_paths = build_note_paths(vault_root)
+            result = resolve_note_name("Python", index, note_paths, "projects", vault_root)
+            self.assertIsNone(result)
+            result = resolve_note_name("Mahoura", index, note_paths, "projects", vault_root)
+            self.assertEqual(result.stem, "Mahoura")
+
+    def test_vault_under_a_people_named_ancestor_does_not_leak_category(self):
+        with tempfile.TemporaryDirectory() as directory:
+            vault_root = Path(directory) / "People" / "vault"
+            _make_vault(vault_root)
+            index = build_name_index(vault_root)
+            note_paths = build_note_paths(vault_root)
+            result = resolve_note_name("Python", index, note_paths, "people", vault_root)
+            self.assertIsNone(result)
+            result = resolve_note_name("DariushSeif", index, note_paths, "people", vault_root)
+            self.assertEqual(result.stem, "DariushSeif")
 
 
 class CompanionPathTests(unittest.TestCase):
@@ -237,6 +271,28 @@ class MainTests(unittest.TestCase):
             sys.argv = ["sync_entities", "--journal-root", str(journal), "--config", str(config_path), "--vault-root", str(vault), "--date", "2026-08-23"]
             try:
                 exit_code = main()
+            finally:
+                sys.argv = old_argv
+            self.assertEqual(exit_code, 0)
+
+    def test_main_exits_zero_when_heartbeat_write_itself_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.write_text("not a directory", encoding="utf-8")
+            vault = root / "vault"
+            vault.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text(json.dumps({
+                "entityUpdates": {"enabled": True, "activeProvider": "test-provider"},
+                "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}},
+            }), encoding="utf-8")
+            old_argv = sys.argv
+            sys.argv = ["sync_entities", "--journal-root", str(journal), "--config", str(config_path), "--vault-root", str(vault), "--date", "2026-08-23"]
+            canned = json.dumps({"people": [], "projects": []})
+            try:
+                with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
+                    exit_code = main()
             finally:
                 sys.argv = old_argv
             self.assertEqual(exit_code, 0)
