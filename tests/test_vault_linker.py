@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.orchestration.vault_linker import build_name_index, inject_links
+from src.orchestration.vault_linker import build_name_index, build_note_paths, inject_links
 
 
 class VaultLinkerTests(unittest.TestCase):
@@ -148,6 +148,30 @@ class VaultLinkerTests(unittest.TestCase):
             all_names = [name for names in index.values() for name in names]
             self.assertNotIn("SomeName - 2025-01", all_names)
             self.assertIn("SomeName", index["somename"])
+
+    def test_build_note_paths_maps_stem_to_real_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_vault(root)
+
+            note_paths = build_note_paths(root)
+
+            self.assertEqual([path.stem for path in note_paths["DariushSeif"]], ["DariushSeif"])
+            self.assertTrue(note_paths["DariushSeif"][0].exists())
+
+    def test_build_note_paths_excludes_companion_notes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._make_vault(root)
+            (root / "People" / "Friends" / "DariushSeif - Activity Mentions.md").write_text("", encoding="utf-8")
+            (root / "Projects" / "Mahoura - Activity Log.md").write_text("", encoding="utf-8")
+
+            note_paths = build_note_paths(root)
+            index = build_name_index(root)
+
+            self.assertNotIn("DariushSeif - Activity Mentions", note_paths)
+            self.assertNotIn("Mahoura - Activity Log", note_paths)
+            self.assertNotIn("mentions", index)
 
 
 if __name__ == "__main__":
