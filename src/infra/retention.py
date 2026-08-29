@@ -7,7 +7,7 @@ import datetime as dt
 import json
 import pathlib
 
-_PRUNED_SUBDIRECTORIES = ("raw", "screenshots", "hourly", "daily", "llm-context")
+_PRUNED_SUBDIRECTORIES = ("raw", "screenshots", "hourly", "daily", "llm-context", "queue/completed", "queue/failed")
 
 
 def run_retention(journal_root: pathlib.Path, retention_days: int) -> dict:

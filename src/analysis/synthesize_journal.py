@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import pathlib
 
+from src.analysis.sessionize import detect_sessions
 from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 
 
@@ -70,9 +71,19 @@ def upsert_narrative(markdown: str, narrative: dict) -> str:
     return markdown.rstrip() + "\n\n" + section
 
 
-def local_time(event: dict) -> str:
-    stamp = event.get("localTimestamp") or event.get("timestamp") or ""
-    return stamp[11:16] if len(stamp) >= 16 else stamp
+def local_time(value: str | None) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        stamp = str(value)
+        return stamp[11:16] if len(stamp) >= 16 else stamp
+    return parsed.astimezone().strftime("%H:%M")
+
+
+def _event_stamp(event: dict) -> str | None:
+    return event.get("localTimestamp") or event.get("timestamp")
 
 
 def truncate(text: str, limit: int) -> str:
@@ -84,17 +95,28 @@ def compact_event(event: dict) -> dict | None:
     source = event.get("source")
     if source == "foreground-window":
         exe = pathlib.Path(str(event.get("executable", ""))).stem or event.get("process", "")
-        return {"t": local_time(event), "type": "window", "app": exe, "title": truncate(event.get("windowTitle", ""), 60)}
+        return {"t": local_time(_event_stamp(event)), "type": "window", "app": exe, "title": truncate(event.get("windowTitle", ""), 60)}
     if source == "focused-content":
-        return {"t": local_time(event), "type": "content", "app": event.get("process", ""), "text": truncate(event.get("content", ""), 150)}
+        return {"t": local_time(_event_stamp(event)), "type": "content", "app": event.get("process", ""), "text": truncate(event.get("content", ""), 150)}
     if source == "screenshot-vision":
         analysis = event.get("analysis") or {}
-        return {"t": local_time(event), "type": "screen", "summary": truncate(analysis.get("summary", ""), 200), "apps": analysis.get("applications", []), "activity": analysis.get("activity_type", "")}
+        return {"t": local_time(_event_stamp(event)), "type": "screen", "summary": truncate(analysis.get("summary", ""), 200), "apps": analysis.get("applications", []), "activity": analysis.get("activity_type", "")}
     return None
 
 
-def read_events(journal: pathlib.Path, date: str) -> list[dict]:
-    events: list[dict] = []
+def compact_session(session: dict) -> dict:
+    start = local_time(session.get("startAt"))
+    end = local_time(session.get("endAt"))
+    return {
+        "t": f"{start}-{end}" if start and end else start or end,
+        "class": session.get("classification", "unknown"),
+        "apps": session.get("apps") or [],
+    }
+
+
+def read_events(journal: pathlib.Path, date: str) -> dict:
+    raw_events: list[dict] = []
+    compacted: list[dict] = []
     for filename in (f"activity-{date}.jsonl", f"content-{date}.jsonl", f"visual-{date}.jsonl"):
         path = journal / "raw" / filename
         if not path.exists():
@@ -102,20 +124,28 @@ def read_events(journal: pathlib.Path, date: str) -> list[dict]:
         for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 try:
-                    compacted = compact_event(json.loads(line))
+                    record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if compacted:
-                    events.append(compacted)
-    return events[-150:]
+                raw_events.append(record)
+                event = compact_event(record)
+                if event:
+                    compacted.append(event)
+    sessions = [compact_session(session) for session in detect_sessions(raw_events)]
+    return {"sessions": sessions, "recent": compacted[-60:]}
 
 
-def call_model(provider: dict, events: list[dict]) -> dict:
-    evidence = json.dumps(events, ensure_ascii=False, separators=(",", ":"))
+def call_model(provider: dict, evidence_dict: dict) -> dict:
+    sessions = evidence_dict["sessions"]
+    recent = evidence_dict["recent"]
+    evidence = json.dumps({"day_sessions": sessions, "recent_detail": recent}, ensure_ascii=False, separators=(",", ":"))
     max_chars = 6000
-    while len(evidence) > max_chars and len(events) > 10:
-        events = events[len(events) // 5:]
-        evidence = json.dumps(events, ensure_ascii=False, separators=(",", ":"))
+    while len(evidence) > max_chars and len(recent) > 5:
+        recent = recent[len(recent) // 3:]
+        evidence = json.dumps({"day_sessions": sessions, "recent_detail": recent}, ensure_ascii=False, separators=(",", ":"))
+    while len(evidence) > max_chars and len(sessions) > 5:
+        sessions = sessions[len(sessions) // 5:]
+        evidence = json.dumps({"day_sessions": sessions, "recent_detail": recent}, ensure_ascii=False, separators=(",", ":"))
     messages = [{"role": "system", "content": PROMPT}, {"role": "user", "content": f"Observed events for the day:\n{evidence}"}]
     content = call_chat_completions(provider, messages, temperature=0.2)
     return parse_model_json(content)
@@ -125,15 +155,15 @@ def main() -> int:
     args = parse_args()
     journal = pathlib.Path(args.journal_root)
     config = json.loads(args.config.read_text(encoding="utf-8"))
-    events = read_events(journal, args.date)
+    evidence_dict = read_events(journal, args.date)
     status_path = journal / "raw" / f"journal-{args.date}.status.json"
     status_path.parent.mkdir(parents=True, exist_ok=True)
-    if not events:
+    if not evidence_dict["sessions"] and not evidence_dict["recent"]:
         status_path.write_text(json.dumps({"date": args.date, "status": "no-events"}) + "\n", encoding="utf-8")
         return 0
     try:
         provider = resolve_provider(config, "journalSynthesis")
-        narrative = call_model(provider, events)
+        narrative = call_model(provider, evidence_dict)
     except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
         status_path.write_text(json.dumps({"date": args.date, "status": "failed", "error": str(error)}) + "\n", encoding="utf-8")
         print(f"Journal synthesis failed: {error}")

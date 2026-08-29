@@ -1,6 +1,6 @@
 {
   "base": {
-    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so and lower confidence. Do not include secrets: omit passwords, access tokens, API keys, private keys, message bodies, and other sensitive values.",
+    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so and lower confidence. Do not include secrets: omit passwords, access tokens, API keys, private keys, and other sensitive values. Never transcribe message text verbatim.",
     "output": {
       "summary": "one concise sentence describing only visible activity",
       "applications": "visible application names",
@@ -21,7 +21,7 @@
       "instructions": "Pay attention to the visible editor, repository, file type, code or test activity, diagnostics, and build status. Describe code at a high level and do not reproduce source secrets or tokens."
     },
     "messaging": {
-      "instructions": "Identify the visible messaging application and broad conversation activity only. Do not transcribe message bodies, names, contact details, attachments, or other private content."
+      "instructions": "Identify the visible messaging application, who the conversation is with (contact or group name as shown), the topic being discussed, and a short non-verbatim gist of the conversation. Do not transcribe message text verbatim, and do not report phone numbers, handles, attachment contents, or other private identifiers beyond the visible contact/group name."
     },
     "unknown": {
       "instructions": "Describe the visible application and broad activity conservatively. Do not guess the context when the application is unclear."

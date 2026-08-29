@@ -94,6 +94,30 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             queue = FileJobQueue(journal / "queue")
             self.assertEqual(len(list((queue.root / "completed").glob("*.json"))), 1)
 
+    def test_successful_run_writes_a_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            with mock.patch.object(module, "call_vision", return_value={"summary": "coding", "confidence": 0.9}):
+                _run(journal)
+
+            heartbeat_path = journal / "health" / "vision-analysis.json"
+            self.assertTrue(heartbeat_path.exists())
+            heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+            self.assertEqual(heartbeat["status"], "success")
+            self.assertEqual(heartbeat["itemsProcessed"], 1)
+
+    def test_failed_run_writes_a_failed_heartbeat_when_nothing_succeeds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            with mock.patch.object(module, "call_vision", side_effect=ValueError("model unavailable")):
+                _run(journal)
+
+            heartbeat_path = journal / "health" / "vision-analysis.json"
+            self.assertTrue(heartbeat_path.exists())
+            heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+            self.assertEqual(heartbeat["status"], "failed")
+            self.assertEqual(heartbeat["itemsProcessed"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

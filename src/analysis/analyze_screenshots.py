@@ -15,6 +15,7 @@ from src.providers.model_client import ProviderError, call_chat_completions, res
 from src.analysis.ocr import extract_text
 from src.infra.processing_queue import FileJobQueue
 from src.analysis.screenshot_fingerprint import deduplicate_images
+from src.infra.heartbeat import write_heartbeat
 
 
 DEFAULT_PROMPTS = pathlib.Path(__file__).parents[2] / "config" / "prompts.json"
@@ -234,7 +235,11 @@ def main() -> int:
     remaining = sum(1 for _ in (journal / "queue" / "pending").glob("*.json"))
     status.write_text(json.dumps({"date": args.date, "status": "complete" if not failures else "partial", "analyzed": len(results), "failed": failures, "queuedRemaining": remaining}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"analyzed": len(results), "failed": len(failures), "queuedRemaining": remaining, "output": str(output)}))
-    return 0 if results or not failures else 1
+    if results or not failures:
+        write_heartbeat(journal, "vision-analysis", "success", items_processed=len(results))
+        return 0
+    write_heartbeat(journal, "vision-analysis", "failed", items_processed=len(results), error_message=failures[0]["error"] if failures else None)
+    return 1
 
 
 if __name__ == "__main__":
