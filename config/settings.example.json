@@ -112,6 +112,13 @@
     "enabled": true,
     "activeProvider": "local-text"
   },
+  "entityUpdates": {
+    "enabled": false,
+    "activeProvider": "local-text",
+    "minConfidence": 0.0,
+    "maxEntitiesPerDay": 5,
+    "maxEvidenceChars": 8000
+  },
   "hourlyBuild": {
     "enabled": true,
     "intervalSeconds": 3600

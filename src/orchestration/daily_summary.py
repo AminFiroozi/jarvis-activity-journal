@@ -98,6 +98,7 @@ def main() -> int:
         vault_root = None
     if vault_root:
         subprocess.run([sys.executable, "-m", "src.orchestration.sync_vault", "--journal-root", str(args.journal_root), "--vault-root", str(vault_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
+        subprocess.run([sys.executable, "-m", "src.orchestration.sync_entities", "--journal-root", str(args.journal_root), "--config", str(args.config), "--vault-root", str(vault_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
 
     print(str(daily_path))
     return result.returncode
