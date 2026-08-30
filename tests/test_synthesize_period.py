@@ -374,6 +374,82 @@ class MainTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             mocked.assert_not_called()
 
+    def test_weekly_synthesis_is_not_frozen_by_a_prior_days_completed_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            config_path = self._config(root, "weekly")
+            monday = "2026-08-24"
+            tuesday = "2026-08-25"
+            thursday = "2026-08-27"
+
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
+                exit_code = self._run(journal, config_path, "weekly", monday)
+            self.assertEqual(exit_code, 0)
+
+            recovered = json.dumps({"summary": "Recovered on Tuesday.", "confidence": 0.5})
+            with mock.patch(
+                "src.analysis.synthesize_period.call_chat_completions",
+                side_effect=[recovered, recovered],
+            ):
+                exit_code = self._run(journal, config_path, "weekly", tuesday)
+            self.assertEqual(exit_code, 0)
+
+            year, week, _ = week_dates(monday)
+            weekly_path = journal / "weekly" / f"{year}-W{week:02d}.md"
+            self.assertTrue(weekly_path.exists())
+
+            fresh = json.dumps({"summary": "Thursday brings fresh evidence.", "confidence": 0.6})
+            with mock.patch(
+                "src.analysis.synthesize_period.call_chat_completions",
+                return_value=fresh,
+            ) as mocked:
+                exit_code = self._run(journal, config_path, "weekly", thursday)
+
+            self.assertEqual(exit_code, 0)
+            mocked.assert_called()
+            self.assertIn("Thursday brings fresh evidence.", weekly_path.read_text(encoding="utf-8"))
+
+    def test_weekly_synthesis_resumes_after_dead_letter_on_a_later_day(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text(json.dumps({
+                "weeklySynthesis": {"enabled": True, "activeProvider": "test-provider", "maxAttempts": 1, "retryDelaySeconds": 60},
+                "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}},
+            }), encoding="utf-8")
+            monday = "2026-08-24"
+            tuesday = "2026-08-25"
+            thursday = "2026-08-27"
+
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
+                exit_code = self._run(journal, config_path, "weekly", monday)
+            self.assertEqual(exit_code, 0)
+
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
+                exit_code = self._run(journal, config_path, "weekly", tuesday)
+            self.assertEqual(exit_code, 0)
+
+            dead_lettered = list((journal / "queue-period" / "failed").glob("*.json"))
+            self.assertTrue(dead_lettered, "expected a dead-lettered weekly job by Tuesday")
+
+            recovered = json.dumps({"summary": "Back on track Thursday.", "confidence": 0.7})
+            with mock.patch(
+                "src.analysis.synthesize_period.call_chat_completions",
+                return_value=recovered,
+            ) as mocked:
+                exit_code = self._run(journal, config_path, "weekly", thursday)
+
+            self.assertEqual(exit_code, 0)
+            mocked.assert_called()
+            year, week, _ = week_dates(monday)
+            weekly_path = journal / "weekly" / f"{year}-W{week:02d}.md"
+            self.assertTrue(weekly_path.exists())
+            self.assertIn("Back on track Thursday.", weekly_path.read_text(encoding="utf-8"))
+
     def test_provider_missing_endpoint_returns_zero_and_writes_failed_heartbeat(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

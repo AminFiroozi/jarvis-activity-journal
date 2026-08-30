@@ -162,6 +162,11 @@ def synthesize_week(provider: dict, journal_root: pathlib.Path, date: str) -> di
     return {"path": str(path), "year": year, "week": week}
 
 
+def _job_in_flight(queue: FileJobQueue, job_id: str) -> bool:
+    existing = queue.find(job_id)
+    return existing is not None and existing[0] in ("pending", "processing")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal-root", required=True, type=pathlib.Path)
@@ -221,7 +226,7 @@ def main() -> int:
         now = dt.datetime.now()
         hour = now.hour
         job_id = f"hourly-{args.date}-{hour:02d}"
-        if queue.find(job_id) is None:
+        if not _job_in_flight(queue, job_id):
             if not has_evidence_for_hour(journal, args.date, hour):
                 results.append({"status": "no-evidence", "date": args.date, "hour": hour})
             else:
@@ -233,8 +238,8 @@ def main() -> int:
                     results.append({"status": "failed", "error": str(error)})
     else:
         year, week, _ = week_dates(args.date)
-        job_id = f"weekly-{year}-W{week:02d}"
-        if queue.find(job_id) is None:
+        job_id = f"weekly-{year}-W{week:02d}-{args.date}"
+        if not _job_in_flight(queue, job_id):
             try:
                 result = synthesize_week(provider, journal, args.date)
                 results.append({"status": "complete", **result})
