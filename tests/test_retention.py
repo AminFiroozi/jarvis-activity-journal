@@ -52,6 +52,27 @@ class RetentionTests(unittest.TestCase):
             self.assertTrue(new_pending.exists())
             self.assertEqual(result["removedFiles"], 2)
 
+    def test_removes_old_completed_and_failed_queue_period_jobs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for state in ("completed", "failed", "pending", "processing"):
+                (root / "queue-period" / state).mkdir(parents=True)
+            old_completed = root / "queue-period" / "completed" / "old.json"
+            old_failed = root / "queue-period" / "failed" / "old.json"
+            new_pending = root / "queue-period" / "pending" / "new.json"
+            for path in (old_completed, old_failed, new_pending):
+                path.write_text("{}", encoding="utf-8")
+            old_time = time.time() - (200 * 86400)
+            os.utime(old_completed, (old_time, old_time))
+            os.utime(old_failed, (old_time, old_time))
+
+            result = run_retention(root, retention_days=90)
+
+            self.assertFalse(old_completed.exists())
+            self.assertFalse(old_failed.exists())
+            self.assertTrue(new_pending.exists())
+            self.assertEqual(result["removedFiles"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

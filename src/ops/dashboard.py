@@ -27,6 +27,12 @@ def build_status(journal_root: Path) -> dict[str, Any]:
             else 0
             for state in ("pending", "processing", "completed", "failed")
         },
+        "queuePeriod": {
+            state: len(list((root / "queue-period" / state).glob("*.json")))
+            if (root / "queue-period" / state).exists()
+            else 0
+            for state in ("pending", "processing", "completed", "failed")
+        },
     }
 
 

@@ -67,6 +67,16 @@ def run_local_checks(root: Path, minimum_free_bytes: int = 1_000_000_000) -> lis
             required=False,
         )
     )
+    failed_period_queue_dir = root / "queue-period" / "failed"
+    failed_period_count = len(list(failed_period_queue_dir.glob("*.json"))) if failed_period_queue_dir.exists() else 0
+    checks.append(
+        _check(
+            "queue-period-failed",
+            failed_period_count == 0,
+            f"{failed_period_count} period synthesis job(s) gave up after repeated failures" if failed_period_count else "no dead-lettered jobs",
+            required=False,
+        )
+    )
     return checks
 
 

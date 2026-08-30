@@ -23,6 +23,22 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(status["health"][0]["service"], "collector")
             self.assertEqual(status["latestJournal"], "2026-08-23.md")
 
+    def test_status_reports_queue_period_job_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "queue-period" / "pending").mkdir(parents=True)
+            (root / "queue-period" / "failed").mkdir(parents=True)
+            (root / "queue-period" / "pending" / "job1.json").write_text("{}", encoding="utf-8")
+            (root / "queue-period" / "failed" / "job2.json").write_text("{}", encoding="utf-8")
+            (root / "queue-period" / "failed" / "job3.json").write_text("{}", encoding="utf-8")
+
+            status = build_status(root)
+
+            self.assertEqual(
+                status["queuePeriod"],
+                {"pending": 1, "processing": 0, "completed": 0, "failed": 2},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
