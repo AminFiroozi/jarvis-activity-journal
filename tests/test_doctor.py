@@ -59,6 +59,32 @@ class DoctorTests(unittest.TestCase):
             queue_check = next(check for check in checks if check["name"] == "queue-failed")
             self.assertTrue(queue_check["ok"])
 
+    def test_warns_when_queue_period_has_failed_jobs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "config" / "settings.json").write_text(json.dumps({"projectPaths": []}), encoding="utf-8")
+            (root / "queue-period" / "failed").mkdir(parents=True)
+            (root / "queue-period" / "failed" / "job1.json").write_text("{}", encoding="utf-8")
+
+            checks = run_local_checks(root, minimum_free_bytes=1)
+
+            queue_period_check = next(check for check in checks if check["name"] == "queue-period-failed")
+            self.assertFalse(queue_period_check["ok"])
+            self.assertFalse(queue_period_check["required"])
+            self.assertIn("1", queue_period_check["detail"])
+
+    def test_queue_period_failed_check_is_ok_when_empty_or_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config").mkdir()
+            (root / "config" / "settings.json").write_text(json.dumps({"projectPaths": []}), encoding="utf-8")
+
+            checks = run_local_checks(root, minimum_free_bytes=1)
+
+            queue_period_check = next(check for check in checks if check["name"] == "queue-period-failed")
+            self.assertTrue(queue_period_check["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

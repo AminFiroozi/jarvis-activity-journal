@@ -91,7 +91,7 @@
     "cloud-text-groq": {
       "endpoint": "https://api.groq.com/openai/v1/chat/completions",
       "model": "openai/gpt-oss-120b",
-      "apiKeyEnv": "GROQ_API_KEY",
+      "apiKeyEnv": ["GROQ_API_KEY", "GROQ_API_KEY_2", "GROQ_API_KEY_3"],
       "proxy": "http://127.0.0.1:10808"
     },
     "cloud-text-gemini": {
@@ -111,6 +111,18 @@
   "journalSynthesis": {
     "enabled": true,
     "activeProvider": "local-text"
+  },
+  "hourlySynthesis": {
+    "enabled": true,
+    "activeProvider": "cloud-text-groq",
+    "maxAttempts": 5,
+    "retryDelaySeconds": 60
+  },
+  "weeklySynthesis": {
+    "enabled": true,
+    "activeProvider": "cloud-text-groq",
+    "maxAttempts": 5,
+    "retryDelaySeconds": 60
   },
   "entityUpdates": {
     "enabled": false,
