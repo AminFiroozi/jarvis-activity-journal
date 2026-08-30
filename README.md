@@ -7,8 +7,9 @@ Pure Python throughout. Tested on Windows; Linux is supported via X11 (window ti
 ## Architecture
 
 ```text
-Screenshot → vision model  → visual activity JSON   (Journal/raw/visual-DATE.jsonl)
-All events → text model    → daily journal narrative (Journal/daily/DATE.md, "LLM narrative" section)
+Screenshot → vision model  → visual activity JSON        (Journal/raw/visual-DATE.jsonl)
+All events → text model    → daily journal narrative      (Journal/daily/DATE.md, "LLM narrative" section)
+All events → text model    → hourly/weekly journal narrative (Journal/hourly/DATE/HH.md, Journal/weekly/YYYY-Www.md)
 ```
 
 Everything that isn't a model call — capture, redaction, JSONL storage, deterministic Markdown, scheduling — is plain Python with no network access.
@@ -117,7 +118,9 @@ Every screenshotAnalyzer.intervalSeconds (default 15 min)
                                         (per-screenshot prompt picked from the app active at capture time)
 
 Every hourlyBuild.intervalSeconds (default 1h)
-  |- analysis/build_journals.py     -> deterministic hourly + weekly Markdown (no model call)
+  |- analysis/synthesize_period.py  -> text model -> Journal/hourly/DATE/HH.md and Journal/weekly/YYYY-Www.md
+  |                                    (an hour with zero evidence — no events, no screenshot — is skipped, not synthesized;
+  |                                    a failed call is queued in Journal/queue-period/ and retried on the next run)
   |- analysis/build_llm_context.py  -> Journal/llm-context/latest.md (raw evidence feed for an LLM assistant)
   `- analysis/synthesize_journal.py -> text model -> Journal/daily/DATE.md ("LLM narrative" section)
 
@@ -134,7 +137,7 @@ On constrained hardware a single vision-analysis run over a dozen screenshots ca
 
 ### Durable retry queue
 
-Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/infra/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.ops.dashboard` exposes queue depth per state.
+Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/infra/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.ops.dashboard` exposes queue depth per state. Hourly and weekly narrative synthesis use the same pattern against a separate queue root, `Journal/queue-period/` — a failed LLM call is queued and retried on the next hourly run rather than lost.
 
 ## Verification
 
@@ -160,9 +163,8 @@ src/
   analysis/         vision/text model calls and deterministic rendering
     analyze_screenshots.py  screenshots -> vision model -> visual-DATE.jsonl
     synthesize_journal.py   events -> text model -> daily narrative
-    journalize.py            deterministic Markdown rendering (no model call)
+    synthesize_period.py    events -> text model -> hourly + weekly narrative, queue-backed retry
     sessionize.py            activity-session classification (no model call)
-    build_journals.py        hourly/weekly Markdown (no model call)
     build_llm_context.py     llm-context/latest.md, raw evidence for an LLM assistant
     ocr.py, screenshot_fingerprint.py   OCR and perceptual-hash helpers
   providers/         model_client.py — provider-neutral OpenAI-compatible client,
