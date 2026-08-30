@@ -120,6 +120,13 @@ def append_entry(path: pathlib.Path, stem: str, category: str, date: str, entry_
     return path
 
 
+def _write_status(journal_root: pathlib.Path, date: str, status: dict) -> dict:
+    status_path = journal_root / "raw" / f"entities-{date}.status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return status
+
+
 def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: dict, date: str, dry_run: bool = False) -> dict:
     if not _DATE_PATTERN.match(date):
         return {"date": date, "status": "invalid-date", "written": [], "skipped": []}
@@ -136,8 +143,16 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
     }
 
     evidence = build_evidence(journal_root, date, roster)
+    if not evidence["narrative"] and not evidence["events"] and not evidence["projects"]:
+        return _write_status(journal_root, date, {"date": date, "status": "no-events", "written": [], "skipped": []})
+    if not roster["people"] and not roster["projects"]:
+        return _write_status(journal_root, date, {"date": date, "status": "no-events", "written": [], "skipped": []})
+
     provider = resolve_provider(config, "entityUpdates")
-    raw_payload = extract_entity_facts(provider, evidence, max_chars=int(stage_config.get("maxEvidenceChars", 8000)))
+    try:
+        raw_payload = extract_entity_facts(provider, evidence, max_chars=int(stage_config.get("maxEvidenceChars", 8000)))
+    except (ValueError, json.JSONDecodeError) as error:
+        return _write_status(journal_root, date, {"date": date, "status": "failed", "written": [], "skipped": [], "error": str(error)})
 
     raw_path = journal_root / "raw" / f"entities-{date}.json"
     raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,7 +176,11 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
                 continue
             existing = resolved.get(note_path)
             if existing is None or entry["confidence"] > existing["confidence"]:
+                if existing is not None:
+                    skipped.append({"name": existing["name"], "category": category, "reason": "superseded-by-higher-confidence"})
                 resolved[note_path] = entry
+            else:
+                skipped.append({"name": entry["name"], "category": category, "reason": "superseded-by-higher-confidence"})
         ranked = sorted(resolved.items(), key=lambda item: item[1]["confidence"], reverse=True)[:max_per_day]
         for note_path, entry in ranked:
             note_text = inject_links(entry["note"], index)
@@ -176,10 +195,7 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
             else:
                 written.append({"name": note_path.stem, "category": category, "path": str(result_path)})
 
-    status = {"date": date, "status": "complete", "written": written, "skipped": skipped}
-    status_path = journal_root / "raw" / f"entities-{date}.status.json"
-    status_path.write_text(json.dumps(status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return status
+    return _write_status(journal_root, date, {"date": date, "status": "complete", "written": written, "skipped": skipped})
 
 
 def parse_args() -> argparse.Namespace:
@@ -214,6 +230,8 @@ def main() -> int:
         return 0
     if result.get("status") == "complete":
         _write_heartbeat_safely(args.journal_root, "entity-updates", "success", items_processed=len(result.get("written", [])))
+    elif result.get("status") == "failed":
+        _write_heartbeat_safely(args.journal_root, "entity-updates", "failed", error_message=result.get("error", ""))
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

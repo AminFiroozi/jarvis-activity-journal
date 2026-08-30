@@ -15,6 +15,15 @@ from src.orchestration.sync_entities import (
 from src.orchestration.vault_linker import build_name_index, build_note_paths
 
 
+def _write_narrative(journal_root: Path, date: str) -> None:
+    raw = journal_root / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / f"journal-{date}.json").write_text(
+        json.dumps({"summary": "A day of ordinary activity was observed."}),
+        encoding="utf-8",
+    )
+
+
 def _make_vault(root: Path) -> None:
     friends = root / "People" / "Friends"
     friends.mkdir(parents=True)
@@ -175,6 +184,7 @@ class SyncEntitiesTests(unittest.TestCase):
             vault = root / "vault"
             journal.mkdir()
             _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
             curated_before = (vault / "People" / "Friends" / "DariushSeif.md").read_text(encoding="utf-8")
 
             canned = json.dumps({
@@ -200,6 +210,7 @@ class SyncEntitiesTests(unittest.TestCase):
             vault = root / "vault"
             journal.mkdir()
             _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
             canned = json.dumps({"people": [{"name": "Erfan", "note": "x" * 50, "confidence": 0.9}], "projects": []})
             with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
                 result = sync_entities(journal, vault, self._config(), "2026-08-23")
@@ -213,6 +224,7 @@ class SyncEntitiesTests(unittest.TestCase):
             vault = root / "vault"
             journal.mkdir()
             _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
             (vault / "People" / "Friends" / "AnotherPerson.md").write_text("", encoding="utf-8")
             canned = json.dumps({
                 "people": [
@@ -233,11 +245,84 @@ class SyncEntitiesTests(unittest.TestCase):
             vault = root / "vault"
             journal.mkdir()
             _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
             canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50, "confidence": 0.9}], "projects": []})
             with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
                 result = sync_entities(journal, vault, self._config(), "2026-08-23", dry_run=True)
             self.assertEqual(len(result["written"]), 1)
             self.assertFalse((vault / "People" / "Friends" / "DariushSeif - Activity Mentions.md").exists())
+
+    def test_zero_evidence_day_never_calls_the_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            vault = root / "vault"
+            journal.mkdir()
+            _make_vault(vault)
+            with mock.patch("src.analysis.entity_facts.call_chat_completions") as mocked:
+                result = sync_entities(journal, vault, self._config(), "2026-08-23")
+            mocked.assert_not_called()
+            self.assertEqual(result["status"], "no-events")
+            self.assertEqual(result["written"], [])
+            self.assertEqual(result["skipped"], [])
+            self.assertFalse((vault / "People" / "Friends" / "DariushSeif - Activity Mentions.md").exists())
+            self.assertFalse((vault / "Projects" / "Mahoura - Activity Log.md").exists())
+
+    def test_empty_roster_day_never_calls_the_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            vault = root / "vault"
+            journal.mkdir()
+            vault.mkdir()
+            _write_narrative(journal, "2026-08-23")
+            with mock.patch("src.analysis.entity_facts.call_chat_completions") as mocked:
+                result = sync_entities(journal, vault, self._config(), "2026-08-23")
+            mocked.assert_not_called()
+            self.assertEqual(result["status"], "no-events")
+            self.assertEqual(result["written"], [])
+            self.assertEqual(result["skipped"], [])
+
+    def test_malformed_model_response_writes_failed_status_with_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            vault = root / "vault"
+            journal.mkdir()
+            _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
+            with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value="not json at all"):
+                result = sync_entities(journal, vault, self._config(), "2026-08-23")
+            self.assertEqual(result["status"], "failed")
+            self.assertTrue(result.get("error"))
+            status_path = journal / "raw" / "entities-2026-08-23.status.json"
+            self.assertTrue(status_path.exists())
+            on_disk = json.loads(status_path.read_text(encoding="utf-8"))
+            self.assertEqual(on_disk["status"], "failed")
+            self.assertTrue(on_disk.get("error"))
+
+    def test_confidence_dedup_loser_is_recorded_in_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            vault = root / "vault"
+            journal.mkdir()
+            _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
+            canned = json.dumps({
+                "people": [
+                    {"name": "DariushSeif", "note": "a" * 50, "confidence": 0.4},
+                    {"name": "Dariush", "note": "b" * 50, "confidence": 0.9},
+                ],
+                "projects": [],
+            })
+            with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
+                result = sync_entities(journal, vault, self._config(), "2026-08-23")
+            self.assertEqual(len(result["written"]), 1)
+            self.assertEqual(result["written"][0]["name"], "DariushSeif")
+            superseded = [entry for entry in result["skipped"] if entry["reason"] == "superseded-by-higher-confidence"]
+            self.assertEqual(len(superseded), 1)
+            self.assertEqual(superseded[0]["name"], "DariushSeif")
 
 
 class MainTests(unittest.TestCase):
@@ -296,6 +381,33 @@ class MainTests(unittest.TestCase):
             finally:
                 sys.argv = old_argv
             self.assertEqual(exit_code, 0)
+
+    def test_main_writes_failure_heartbeat_on_malformed_model_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            vault = root / "vault"
+            journal.mkdir()
+            _make_vault(vault)
+            _write_narrative(journal, "2026-08-23")
+            config_path = root / "settings.json"
+            config_path.write_text(json.dumps({
+                "entityUpdates": {"enabled": True, "activeProvider": "test-provider"},
+                "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}},
+            }), encoding="utf-8")
+            old_argv = sys.argv
+            sys.argv = ["sync_entities", "--journal-root", str(journal), "--config", str(config_path), "--vault-root", str(vault), "--date", "2026-08-23"]
+            try:
+                with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value="not json at all"):
+                    exit_code = main()
+            finally:
+                sys.argv = old_argv
+            self.assertEqual(exit_code, 0)
+            heartbeat_path = journal / "health" / "entity-updates.json"
+            self.assertTrue(heartbeat_path.exists())
+            heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+            self.assertEqual(heartbeat["status"], "failed")
+            self.assertTrue(heartbeat.get("lastError"))
 
 
 if __name__ == "__main__":
