@@ -17,7 +17,8 @@ def main() -> int:
     args = parser.parse_args()
 
     steps = [
-        [sys.executable, "-m", "src.analysis.build_journals", "--journal-root", str(args.journal_root), "--date", args.date],
+        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", "hourly", "--date", args.date],
+        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", "weekly", "--date", args.date],
         [sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date],
         [sys.executable, "-m", "src.analysis.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date],
     ]
