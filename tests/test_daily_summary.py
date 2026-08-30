@@ -35,6 +35,12 @@ class DailySummaryVaultRootGatingTests(unittest.TestCase):
             if "src.orchestration.sync_vault" in call.args[0]
         ]
 
+    def _sync_entities_calls(self, mock_run):
+        return [
+            call for call in mock_run.call_args_list
+            if "src.orchestration.sync_entities" in call.args[0]
+        ]
+
     def test_sync_vault_invoked_when_vault_root_set(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -62,6 +68,34 @@ class DailySummaryVaultRootGatingTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(len(self._sync_vault_calls(mock_run)), 0)
+
+    def test_sync_entities_invoked_when_vault_root_set(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal_root = root / "journal"
+            journal_root.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text(
+                json.dumps({"vaultRoot": str(root / "vault")}), encoding="utf-8"
+            )
+
+            exit_code, mock_run = self._invoke_main(journal_root, config_path, "2026-08-28")
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(len(self._sync_entities_calls(mock_run)), 1)
+
+    def test_sync_entities_not_invoked_when_vault_root_absent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal_root = root / "journal"
+            journal_root.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text(json.dumps({}), encoding="utf-8")
+
+            exit_code, mock_run = self._invoke_main(journal_root, config_path, "2026-08-28")
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(len(self._sync_entities_calls(mock_run)), 0)
 
     def test_main_does_not_raise_on_malformed_config(self):
         with tempfile.TemporaryDirectory() as directory:

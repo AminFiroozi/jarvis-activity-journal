@@ -40,7 +40,7 @@ pip install -e ".[dev]"          # add [linux] on Linux, [windows] or [macos] as
 cp config/settings.example.json /path/to/Journal/config/settings.json
 ```
 
-Edit `settings.json`: set `repositoryPath` to this repo's absolute path, `projectPaths` to the git repos you want evidence from, and review the `privacy` block before enabling capture. Every interval (`collectors.*.intervalSeconds`, `screenshotAnalyzer.intervalSeconds`, `hourlyBuild.intervalSeconds`, `dailySummary.time`) is config-driven — change the numbers, no code edits needed. And set `vaultRoot` to your Obsidian vault's absolute path if you want the daily journal mirrored there (leave unset to disable).
+Edit `settings.json`: set `repositoryPath` to this repo's absolute path, `projectPaths` to the git repos you want evidence from, and review the `privacy` block before enabling capture. Every interval (`collectors.*.intervalSeconds`, `screenshotAnalyzer.intervalSeconds`, `hourlyBuild.intervalSeconds`, `dailySummary.time`) is config-driven — change the numbers, no code edits needed. And set `vaultRoot` to your Obsidian vault's absolute path if you want the daily journal mirrored there (leave unset to disable). When `vaultRoot` is set, you can optionally enable `entityUpdates.enabled` to automatically extract noteworthy person and project mentions from the daily narrative and append them as companion notes (e.g. `<Name> - Activity Mentions.md` / `<Name> - Activity Log.md`) beside — never inside — your curated vault notes; this is a separate opt-in that defaults to off, uses the local text provider by default, and never modifies existing curated notes.
 
 Register the scheduler for your platform:
 
@@ -126,7 +126,8 @@ At logon
   `- orchestration/start_vision_service.py -> starts and pre-loads the local model, where configured
 
 dailySummary.time (default 23:55)
-  `- orchestration/daily_summary.py -> retention cleanup, final vision pass, deterministic daily scaffold, narrative refresh
+  `- orchestration/daily_summary.py -> retention cleanup, final vision pass, deterministic daily scaffold, narrative refresh,
+                                        optional extraction of person/project mentions to companion notes (when vaultRoot and entityUpdates.enabled are set)
 ```
 
 On constrained hardware a single vision-analysis run over a dozen screenshots can take many minutes; every scheduled job is registered with an execution time limit and "ignore new instance" so a slow run blocks its own next trigger instead of stacking concurrent model loads.
