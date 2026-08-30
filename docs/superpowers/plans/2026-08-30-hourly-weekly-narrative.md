@@ -550,7 +550,7 @@ class MainTests(unittest.TestCase):
             config_path = self._config(root, "hourly")
             from src.infra.processing_queue import FileJobQueue
             queue = FileJobQueue(journal / "queue-period")
-            queue.enqueue("hourly", {"date": "2026-08-23", "hour": 8}, job_id="hourly:2026-08-23:08")
+            queue.enqueue("hourly", {"date": "2026-08-23", "hour": 8}, job_id="hourly-2026-08-23-08")
             fixed_now = dt.datetime(2026, 8, 23, 9, 30, 0)
             canned = json.dumps({"summary": "ok", "confidence": 0.5})
             with mock.patch("src.analysis.synthesize_period.dt") as mocked_dt:
@@ -688,7 +688,7 @@ def main() -> int:
     if args.period == "hourly":
         now = dt.datetime.now()
         hour = now.hour
-        job_id = f"hourly:{args.date}:{hour:02d}"
+        job_id = f"hourly-{args.date}-{hour:02d}"
         if queue.find(job_id) is None:
             if not has_evidence_for_hour(journal, args.date, hour):
                 results.append({"status": "no-evidence", "date": args.date, "hour": hour})
@@ -701,7 +701,7 @@ def main() -> int:
                     results.append({"status": "failed", "error": str(error)})
     else:
         year, week, _ = week_dates(args.date)
-        job_id = f"weekly:{year}-W{week:02d}"
+        job_id = f"weekly-{year}-W{week:02d}"
         if queue.find(job_id) is None:
             try:
                 result = synthesize_week(provider, journal, args.date)
