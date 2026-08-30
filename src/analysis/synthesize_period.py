@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import json
 import pathlib
@@ -11,7 +12,9 @@ from typing import Callable
 
 from src.analysis.narrative import compact_event, compact_session, event_stamp, fit_evidence, parse_model_json
 from src.analysis.sessionize import detect_sessions
-from src.providers.model_client import call_chat_completions
+from src.infra.heartbeat import write_heartbeat
+from src.infra.processing_queue import FileJobQueue
+from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 
 
 HOURLY_PROMPT = """You are writing a factual, detailed personal activity journal entry for ONE HOUR of observed computer events.
@@ -138,3 +141,112 @@ def call_model(provider: dict, evidence_dict: dict, prompt: str, max_chars: int 
     messages = [{"role": "system", "content": prompt}, {"role": "user", "content": f"Observed events:\n{evidence}"}]
     content = call_chat_completions(provider, messages, temperature=0.2)
     return parse_model_json(content)
+
+
+def synthesize_hour(provider: dict, journal_root: pathlib.Path, date: str, hour: int) -> dict:
+    evidence = read_period_events(journal_root, [date], hour=hour)
+    narrative = call_model(provider, evidence, HOURLY_PROMPT)
+    path = journal_root / "hourly" / date / f"{hour:02d}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_period_document(f"Hourly journal — {date} {hour:02d}:00", narrative), encoding="utf-8")
+    return {"path": str(path)}
+
+
+def synthesize_week(provider: dict, journal_root: pathlib.Path, date: str) -> dict:
+    year, week, dates = week_dates(date)
+    evidence = read_period_events(journal_root, dates)
+    narrative = call_model(provider, evidence, WEEKLY_PROMPT)
+    path = journal_root / "weekly" / f"{year}-W{week:02d}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(render_period_document(f"Weekly journal — {year}-W{week:02d}", narrative), encoding="utf-8")
+    return {"path": str(path), "year": year, "week": week}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--journal-root", required=True, type=pathlib.Path)
+    parser.add_argument("--config", required=True, type=pathlib.Path)
+    parser.add_argument("--period", required=True, choices=("hourly", "weekly"))
+    parser.add_argument("--date", default=dt.date.today().isoformat())
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    journal = args.journal_root
+    config = json.loads(args.config.read_text(encoding="utf-8"))
+    stage_key = "hourlySynthesis" if args.period == "hourly" else "weeklySynthesis"
+    stage_config = config.get(stage_key) or {}
+    heartbeat_name = f"{args.period}-synthesis"
+
+    if not stage_config.get("enabled", True):
+        print(json.dumps({"period": args.period, "status": "disabled"}))
+        return 0
+
+    try:
+        provider = resolve_provider(config, stage_key)
+    except ProviderError as error:
+        write_heartbeat(journal, heartbeat_name, "failed", error_message=str(error))
+        print(f"{args.period} synthesis failed: {error}")
+        return 0
+
+    max_attempts = int(stage_config.get("maxAttempts", 5))
+    retry_delay_seconds = int(stage_config.get("retryDelaySeconds", 60))
+    queue = FileJobQueue(journal / "queue-period")
+
+    results: list[dict] = []
+    attempted: set[str] = set()
+    while True:
+        job = queue.claim(kind=args.period, exclude_ids=attempted)
+        if job is None:
+            break
+        attempted.add(job["id"])
+        payload = job["payload"]
+        try:
+            if args.period == "hourly":
+                result = synthesize_hour(provider, journal, payload["date"], payload["hour"])
+            else:
+                result = synthesize_week(provider, journal, payload["date"])
+            queue.complete(job["id"], result)
+            results.append({"status": "complete", **result})
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
+            outcome = queue.fail(job["id"], str(error), max_attempts=max_attempts, retry_delay_seconds=retry_delay_seconds)
+            results.append({"status": outcome["status"], "error": str(error)})
+
+    if args.period == "hourly":
+        now = dt.datetime.now()
+        hour = now.hour
+        job_id = f"hourly-{args.date}-{hour:02d}"
+        if queue.find(job_id) is None:
+            if not has_evidence_for_hour(journal, args.date, hour):
+                results.append({"status": "no-evidence", "date": args.date, "hour": hour})
+            else:
+                try:
+                    result = synthesize_hour(provider, journal, args.date, hour)
+                    results.append({"status": "complete", **result})
+                except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
+                    queue.enqueue("hourly", {"date": args.date, "hour": hour}, job_id=job_id)
+                    results.append({"status": "failed", "error": str(error)})
+    else:
+        year, week, _ = week_dates(args.date)
+        job_id = f"weekly-{year}-W{week:02d}"
+        if queue.find(job_id) is None:
+            try:
+                result = synthesize_week(provider, journal, args.date)
+                results.append({"status": "complete", **result})
+            except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
+                queue.enqueue("weekly", {"date": args.date}, job_id=job_id)
+                results.append({"status": "failed", "error": str(error)})
+
+    print(json.dumps({"period": args.period, "results": results}, ensure_ascii=False))
+    failed = [item for item in results if item["status"] == "failed"]
+    completed = [item for item in results if item["status"] == "complete"]
+    if failed:
+        write_heartbeat(journal, heartbeat_name, "failed", items_processed=len(completed), error_message=failed[-1]["error"])
+    else:
+        write_heartbeat(journal, heartbeat_name, "success", items_processed=len(completed))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
