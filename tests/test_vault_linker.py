@@ -159,6 +159,16 @@ class VaultLinkerTests(unittest.TestCase):
             self.assertEqual([path.stem for path in note_paths["DariushSeif"]], ["DariushSeif"])
             self.assertTrue(note_paths["DariushSeif"][0].exists())
 
+    def test_build_note_paths_indexes_vault_rooted_under_a_history_named_ancestor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "History" / "MyVault"
+            self._make_vault(root)
+
+            note_paths = build_note_paths(root)
+
+            self.assertIn("DariushSeif", note_paths)
+            self.assertIn("Mahoura", note_paths)
+
     def test_build_note_paths_excludes_companion_notes(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

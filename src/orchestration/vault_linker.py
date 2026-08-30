@@ -32,7 +32,11 @@ def build_note_paths(vault_root: pathlib.Path) -> dict[str, list[pathlib.Path]]:
         for path in sorted(vault_root.glob(pattern)):
             if not path.is_file():
                 continue
-            if "History" in path.parts:
+            try:
+                relative = path.relative_to(vault_root)
+            except ValueError:
+                continue
+            if "History" in relative.parts:
                 continue
             if _is_companion_note(path.stem):
                 continue
