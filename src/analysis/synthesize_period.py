@@ -174,7 +174,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     journal = args.journal_root
-    config = json.loads(args.config.read_text(encoding="utf-8"))
+    try:
+        config = json.loads(args.config.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"{args.period} synthesis failed: {error}")
+        return 0
     stage_key = "hourlySynthesis" if args.period == "hourly" else "weeklySynthesis"
     stage_config = config.get(stage_key) or {}
     heartbeat_name = f"{args.period}-synthesis"
@@ -185,7 +189,7 @@ def main() -> int:
 
     try:
         provider = resolve_provider(config, stage_key)
-    except ProviderError as error:
+    except (ProviderError, KeyError) as error:
         write_heartbeat(journal, heartbeat_name, "failed", error_message=str(error))
         print(f"{args.period} synthesis failed: {error}")
         return 0

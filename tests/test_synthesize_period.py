@@ -349,6 +349,52 @@ class MainTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertTrue((journal / "weekly" / f"{year}-W{week:02d}.md").exists())
 
+    def test_missing_config_file_returns_zero_and_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            config_path = root / "does-not-exist.json"
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
+                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
+
+            self.assertEqual(exit_code, 0)
+            mocked.assert_not_called()
+
+    def test_malformed_config_json_returns_zero_and_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text("not valid json {", encoding="utf-8")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
+                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
+
+            self.assertEqual(exit_code, 0)
+            mocked.assert_not_called()
+
+    def test_provider_missing_endpoint_returns_zero_and_writes_failed_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text(json.dumps({
+                "hourlySynthesis": {"enabled": True, "activeProvider": "test-provider", "maxAttempts": 5, "retryDelaySeconds": 60},
+                "providers": {"test-provider": {"model": "m"}},
+            }), encoding="utf-8")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
+                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
+
+            self.assertEqual(exit_code, 0)
+            mocked.assert_not_called()
+            heartbeat_path = journal / "health" / "hourly-synthesis.json"
+            self.assertTrue(heartbeat_path.exists())
+            heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+            self.assertEqual(heartbeat["status"], "failed")
+            self.assertTrue(heartbeat.get("lastError"))
+
 
 if __name__ == "__main__":
     unittest.main()
