@@ -217,6 +217,21 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             self.assertTrue(target.exists())
             self.assertIn("Unchanged since 00:00:00.", target.read_text(encoding="utf-8"))
 
+    def test_job_whose_screenshot_file_is_gone_is_dead_lettered_on_the_first_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            from src.infra.processing_queue import FileJobQueue
+
+            missing = journal / "screenshots" / "2026-01-01" / "screen-01-00-00-000.jpg"
+            queue = FileJobQueue(journal / "queue")
+            queue.enqueue("vision", {"screenshot": str(missing), "date": "2026-01-01", "context": "unknown"}, job_id="gone")
+            with mock.patch.object(module, "call_vision", side_effect=FileNotFoundError("gone")):
+                _run(journal)
+
+            state, job = queue.find("gone")
+            self.assertEqual(state, "failed")
+            self.assertEqual(job["attempts"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

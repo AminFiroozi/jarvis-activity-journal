@@ -236,7 +236,8 @@ def main() -> int:
             queue.complete(job["id"], {"ok": True})
             results.append({"timestamp": dt.datetime.fromtimestamp(image.stat().st_mtime, dt.timezone.utc).isoformat(), "source": "screenshot-vision", "screenshot": str(image), "analysis": analysis})
         except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
-            outcome = queue.fail(job["id"], str(error), max_attempts=max_attempts, retry_delay_seconds=retry_delay_seconds)
+            # a deleted screenshot can never succeed, so dead-letter it immediately
+            outcome = queue.fail(job["id"], str(error), max_attempts=1 if isinstance(error, FileNotFoundError) else max_attempts, retry_delay_seconds=retry_delay_seconds)
             failures.append({"screenshot": str(image), "error": str(error), "queueStatus": outcome["status"], "attempts": outcome["attempts"]})
 
     by_date: dict[str, list[dict]] = {}

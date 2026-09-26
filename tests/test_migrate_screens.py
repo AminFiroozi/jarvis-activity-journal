@@ -42,7 +42,10 @@ class MainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
             queue = FileJobQueue(journal / "queue")
-            queue.enqueue("vision", {"screenshot": "a.jpg"}, job_id="a")
+            image = journal / "screenshots" / "2026-09-26" / "screen-10-00-00-000.jpg"
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"x")
+            queue.enqueue("vision", {"screenshot": str(image)}, job_id="a")
             queue.claim()
             queue.fail("a", "boom", max_attempts=1)
 
@@ -50,6 +53,52 @@ class MainTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             self.assertEqual(queue.find("a")[0], "pending")
+
+
+class MissingScreenshotTests(unittest.TestCase):
+    def _queue_with_jobs(self, journal: Path):
+        existing = journal / "screenshots" / "2026-09-26" / "screen-10-00-00-000.jpg"
+        existing.parent.mkdir(parents=True)
+        existing.write_bytes(b"x")
+        missing = journal / "screenshots" / "2026-09-02" / "screen-15-57-21-158.jpg"
+        queue = FileJobQueue(journal / "queue")
+        queue.enqueue("vision", {"screenshot": str(existing)}, job_id="existing")
+        queue.enqueue("vision", {"screenshot": str(missing)}, job_id="missing")
+        return queue
+
+    def test_drop_missing_dead_letters_only_pending_jobs_whose_file_is_gone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            queue = self._queue_with_jobs(journal)
+
+            exit_code = main(["--journal-root", str(journal), "--drop-missing"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(queue.find("existing")[0], "pending")
+            self.assertEqual(queue.find("missing")[0], "failed")
+
+    def test_requeue_failed_skips_jobs_whose_file_is_gone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            queue = self._queue_with_jobs(journal)
+            for job_id in ("existing", "missing"):
+                queue.claim()
+                queue.fail(job_id, "boom", max_attempts=1)
+
+            main(["--journal-root", str(journal), "--requeue-failed"])
+
+            self.assertEqual(queue.find("existing")[0], "pending")
+            self.assertEqual(queue.find("missing")[0], "failed")
+
+    def test_job_without_a_screenshot_path_counts_as_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            queue = FileJobQueue(journal / "queue")
+            queue.enqueue("vision", {}, job_id="no-path")
+
+            main(["--journal-root", str(journal), "--drop-missing"])
+
+            self.assertEqual(queue.find("no-path")[0], "failed")
 
 
 if __name__ == "__main__":

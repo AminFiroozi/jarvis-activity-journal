@@ -94,6 +94,39 @@ class ProcessingQueueTests(unittest.TestCase):
             self.assertEqual(queue.find("b")[0], "failed")
             self.assertIsNotNone(queue.claim(kind="vision"))
 
+    def test_requeue_failed_honours_the_should_requeue_predicate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = FileJobQueue(Path(directory))
+            queue.enqueue("vision", {"screenshot": "keep.jpg"}, job_id="keep")
+            queue.enqueue("vision", {"screenshot": "skip.jpg"}, job_id="skip")
+            for job_id in ("keep", "skip"):
+                queue.claim()
+                queue.fail(job_id, "boom", max_attempts=1)
+
+            moved = queue.requeue_failed(kind="vision", should_requeue=lambda job: job["payload"]["screenshot"] == "keep.jpg")
+
+            self.assertEqual(moved, 1)
+            self.assertEqual(queue.find("keep")[0], "pending")
+            self.assertEqual(queue.find("skip")[0], "failed")
+
+    def test_dead_letter_pending_moves_matching_jobs_to_failed_with_a_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = FileJobQueue(Path(directory))
+            queue.enqueue("vision", {"screenshot": "gone.jpg"}, job_id="gone")
+            queue.enqueue("vision", {"screenshot": "here.jpg"}, job_id="here")
+            queue.enqueue("hourly", {"screenshot": "gone.jpg"}, job_id="other-kind")
+
+            moved = queue.dead_letter_pending(lambda job: job["payload"]["screenshot"] == "gone.jpg", "screenshot file missing", kind="vision")
+
+            self.assertEqual(moved, 1)
+            state, job = queue.find("gone")
+            self.assertEqual(state, "failed")
+            self.assertEqual(job["status"], "failed")
+            self.assertEqual(job["lastError"], "screenshot file missing")
+            self.assertIn("failedAt", job)
+            self.assertEqual(queue.find("here")[0], "pending")
+            self.assertEqual(queue.find("other-kind")[0], "pending")
+
 
 if __name__ == "__main__":
     unittest.main()
