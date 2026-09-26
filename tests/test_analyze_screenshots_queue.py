@@ -80,7 +80,7 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
     def test_successful_analysis_completes_job_and_writes_output(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = _make_journal(Path(directory))
-            with mock.patch.object(module, "call_vision", return_value={"summary": "coding", "confidence": 0.9}):
+            with mock.patch.object(module, "call_vision", return_value={"summary": "coding"}):
                 _run(journal)
 
             output = journal / "raw" / "visual-2026-01-01.jsonl"
@@ -97,7 +97,7 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
     def test_successful_run_writes_a_heartbeat(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = _make_journal(Path(directory))
-            with mock.patch.object(module, "call_vision", return_value={"summary": "coding", "confidence": 0.9}):
+            with mock.patch.object(module, "call_vision", return_value={"summary": "coding"}):
                 _run(journal)
 
             heartbeat_path = journal / "health" / "vision-analysis.json"

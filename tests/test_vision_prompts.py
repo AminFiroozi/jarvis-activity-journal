@@ -34,6 +34,14 @@ class VisionPromptTests(unittest.TestCase):
         self.assertIn("observed facts", prompt.lower())
         self.assertIn("do not include secrets", prompt.lower())
 
+    def test_prompt_schema_has_no_confidence_field(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        prompt = build_prompt("browser", prompts, None)
+
+        self.assertNotIn('"confidence"', prompt)
+        self.assertNotIn("lower confidence", prompt.lower())
+
     def test_ocr_missing_optional_dependency_is_failure_safe(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "screen.jpg"

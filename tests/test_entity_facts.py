@@ -87,7 +87,7 @@ class ExtractEntityFactsTests(unittest.TestCase):
     def test_parses_the_model_response(self):
         provider = {"name": "test"}
         evidence = {"date": "2026-08-23", "narrative": "text", "projects": [], "roster": {"people": [], "projects": []}, "events": []}
-        canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50, "confidence": 0.8}], "projects": []})
+        canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50}], "projects": []})
         with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned) as mocked:
             result = extract_entity_facts(provider, evidence)
         self.assertEqual(result["people"][0]["name"], "DariushSeif")
@@ -97,7 +97,7 @@ class ExtractEntityFactsTests(unittest.TestCase):
 class ValidateFactsTests(unittest.TestCase):
     def test_drops_entries_with_blank_name_or_short_note(self):
         payload = {
-            "people": [{"name": "", "note": "x" * 50}, {"name": "DariushSeif", "note": "too short"}, {"name": "Mahoura", "note": "x" * 50, "confidence": 0.7}],
+            "people": [{"name": "", "note": "x" * 50}, {"name": "DariushSeif", "note": "too short"}, {"name": "Mahoura", "note": "x" * 50}],
             "projects": "not-a-list",
         }
         result = validate_facts(payload)
@@ -105,11 +105,11 @@ class ValidateFactsTests(unittest.TestCase):
         self.assertEqual(result["people"][0]["name"], "Mahoura")
         self.assertEqual(result["projects"], [])
 
-    def test_defaults_confidence_and_evidence(self):
-        payload = {"people": [{"name": "X", "note": "y" * 50}], "projects": []}
+    def test_defaults_evidence_and_has_no_confidence(self):
+        payload = {"people": [{"name": "X", "note": "y" * 50, "confidence": 0.9}], "projects": []}
         result = validate_facts(payload)
-        self.assertEqual(result["people"][0]["confidence"], 0.0)
         self.assertEqual(result["people"][0]["evidence"], [])
+        self.assertNotIn("confidence", result["people"][0])
 
 
 if __name__ == "__main__":

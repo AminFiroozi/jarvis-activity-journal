@@ -82,7 +82,7 @@ def render(journal_root: pathlib.Path, date: str) -> str:
         for event in visual_events[-12:]:
             analysis = event.get("analysis") or {}
             time_label = local_time(event.get("timestamp", ""), "%H:%M")
-            lines.append(f"- {time_label} — {analysis.get('activity_type')}: {analysis.get('summary')} (confidence: {analysis.get('confidence')})")
+            lines.append(f"- {time_label} — {analysis.get('activity_type')}: {analysis.get('summary')}")
     else:
         lines.append("- No vision observations are available yet. Configure a vision provider and run the analysis pipeline.")
 

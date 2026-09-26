@@ -114,7 +114,7 @@ OCR evidence is supplemental and may be wrong; use the screenshot as the source 
 {ocr_text}
 
 Return only valid JSON matching this schema: {schema}
-Use empty arrays and lower confidence when evidence is unclear. Do not include secrets."""
+Use empty arrays when evidence is unclear. Do not include secrets."""
 
 
 def parse_args() -> argparse.Namespace:

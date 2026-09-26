@@ -156,7 +156,7 @@ class AppendEntryTests(unittest.TestCase):
 
 class SyncEntitiesTests(unittest.TestCase):
     def _config(self, **overrides):
-        base = {"entityUpdates": {"enabled": True, "activeProvider": "test-provider", "minConfidence": 0.0, "maxEntitiesPerDay": 5}, "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}}}
+        base = {"entityUpdates": {"enabled": True, "activeProvider": "test-provider", "maxEntitiesPerDay": 5}, "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}}}
         base["entityUpdates"].update(overrides)
         return base
 
@@ -188,7 +188,7 @@ class SyncEntitiesTests(unittest.TestCase):
             curated_before = (vault / "People" / "Friends" / "DariushSeif.md").read_text(encoding="utf-8")
 
             canned = json.dumps({
-                "people": [{"name": "DariushSeif", "note": "Dariush reviewed a pull request on the Mahoura project today.", "evidence": ["reviewed PR"], "confidence": 0.8}],
+                "people": [{"name": "DariushSeif", "note": "Dariush reviewed a pull request on the Mahoura project today.", "evidence": ["reviewed PR"]}],
                 "projects": [],
             })
             with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
@@ -211,7 +211,7 @@ class SyncEntitiesTests(unittest.TestCase):
             journal.mkdir()
             _make_vault(vault)
             _write_narrative(journal, "2026-08-23")
-            canned = json.dumps({"people": [{"name": "Erfan", "note": "x" * 50, "confidence": 0.9}], "projects": []})
+            canned = json.dumps({"people": [{"name": "Erfan", "note": "x" * 50}], "projects": []})
             with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
                 result = sync_entities(journal, vault, self._config(), "2026-08-23")
             self.assertEqual(result["written"], [])
@@ -228,8 +228,8 @@ class SyncEntitiesTests(unittest.TestCase):
             (vault / "People" / "Friends" / "AnotherPerson.md").write_text("", encoding="utf-8")
             canned = json.dumps({
                 "people": [
-                    {"name": "DariushSeif", "note": "x" * 50, "confidence": 0.9},
-                    {"name": "AnotherPerson", "note": "y" * 50, "confidence": 0.5},
+                    {"name": "DariushSeif", "note": "x" * 50, "evidence": ["a", "b"]},
+                    {"name": "AnotherPerson", "note": "y" * 50, "evidence": ["a"]},
                 ],
                 "projects": [],
             })
@@ -246,7 +246,7 @@ class SyncEntitiesTests(unittest.TestCase):
             journal.mkdir()
             _make_vault(vault)
             _write_narrative(journal, "2026-08-23")
-            canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50, "confidence": 0.9}], "projects": []})
+            canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50}], "projects": []})
             with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned):
                 result = sync_entities(journal, vault, self._config(), "2026-08-23", dry_run=True)
             self.assertEqual(len(result["written"]), 1)
@@ -301,7 +301,7 @@ class SyncEntitiesTests(unittest.TestCase):
             self.assertEqual(on_disk["status"], "failed")
             self.assertTrue(on_disk.get("error"))
 
-    def test_confidence_dedup_loser_is_recorded_in_skipped(self):
+    def test_evidence_dedup_loser_is_recorded_in_skipped(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             journal = root / "journal"
@@ -311,8 +311,8 @@ class SyncEntitiesTests(unittest.TestCase):
             _write_narrative(journal, "2026-08-23")
             canned = json.dumps({
                 "people": [
-                    {"name": "DariushSeif", "note": "a" * 50, "confidence": 0.4},
-                    {"name": "Dariush", "note": "b" * 50, "confidence": 0.9},
+                    {"name": "DariushSeif", "note": "a" * 50, "evidence": ["one"]},
+                    {"name": "Dariush", "note": "b" * 50, "evidence": ["one", "two"]},
                 ],
                 "projects": [],
             })
@@ -320,7 +320,7 @@ class SyncEntitiesTests(unittest.TestCase):
                 result = sync_entities(journal, vault, self._config(), "2026-08-23")
             self.assertEqual(len(result["written"]), 1)
             self.assertEqual(result["written"][0]["name"], "DariushSeif")
-            superseded = [entry for entry in result["skipped"] if entry["reason"] == "superseded-by-higher-confidence"]
+            superseded = [entry for entry in result["skipped"] if entry["reason"] == "superseded-by-more-evidence"]
             self.assertEqual(len(superseded), 1)
             self.assertEqual(superseded[0]["name"], "DariushSeif")
 

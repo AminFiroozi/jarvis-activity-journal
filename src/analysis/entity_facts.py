@@ -17,10 +17,10 @@ Use ONLY names from the supplied roster, copied verbatim into "name". If you can
 
 Return only valid JSON with this shape:
 {
-  "people": [{"name": "RosterName", "note": "one factual paragraph", "evidence": ["observed fact"], "confidence": 0.0}],
-  "projects": [{"name": "RosterName", "note": "one factual paragraph", "evidence": ["observed fact"], "confidence": 0.0}]
+  "people": [{"name": "RosterName", "note": "one factual paragraph", "evidence": ["observed fact"]}],
+  "projects": [{"name": "RosterName", "note": "one factual paragraph", "evidence": ["observed fact"]}]
 }
-Do not invent intent, accomplishments, conversations, or conclusions. Do not reproduce verbatim message text or secrets. Mark uncertain interpretations through a lower confidence value."""
+Do not invent intent, accomplishments, conversations, or conclusions. Do not reproduce verbatim message text or secrets. Leave out anything you are unsure of."""
 
 
 def compact_entity_event(event: dict) -> dict | None:
@@ -121,11 +121,7 @@ def _validate_entries(entries) -> list[dict]:
             continue
         evidence_list = entry.get("evidence")
         evidence_list = [str(item) for item in evidence_list] if isinstance(evidence_list, list) else []
-        try:
-            confidence = float(entry.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
-        valid.append({"name": name, "note": note, "evidence": evidence_list, "confidence": confidence})
+        valid.append({"name": name, "note": note, "evidence": evidence_list})
     return valid
 
 

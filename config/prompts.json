@@ -1,13 +1,12 @@
 {
   "base": {
-    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so and lower confidence. Do not include secrets: omit passwords, access tokens, API keys, private keys, and other sensitive values. Never transcribe message text verbatim.",
+    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so. Do not include secrets: omit passwords, access tokens, API keys, private keys, and other sensitive values. Never transcribe message text verbatim.",
     "output": {
       "summary": "one concise sentence describing only visible activity",
       "applications": "visible application names",
       "projects": "visible project, repository, or website names",
       "activity_type": "coding|browsing|chatting|meeting|media|administration|other",
-      "observations": "short list of directly observed facts",
-      "confidence": "number from 0.0 to 1.0"
+      "observations": "short list of directly observed facts"
     }
   },
   "contexts": {
