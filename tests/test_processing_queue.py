@@ -76,6 +76,24 @@ class ProcessingQueueTests(unittest.TestCase):
             self.assertEqual(dead["attempts"], 2)
             self.assertEqual(dead["lastError"], "model unavailable")
 
+    def test_requeue_failed_moves_matching_jobs_back_to_pending_with_fresh_attempts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = FileJobQueue(Path(directory))
+            queue.enqueue("vision", {"screenshot": "a.jpg"}, job_id="a")
+            queue.enqueue("hourly", {"date": "2026-09-26"}, job_id="b")
+            for job_id in ("a", "b"):
+                queue.claim()
+                queue.fail(job_id, "boom", max_attempts=1)
+
+            moved = queue.requeue_failed(kind="vision")
+
+            self.assertEqual(moved, 1)
+            state, job = queue.find("a")
+            self.assertEqual((state, job["attempts"], job["status"]), ("pending", 0, "pending"))
+            self.assertNotIn("failedAt", job)
+            self.assertEqual(queue.find("b")[0], "failed")
+            self.assertIsNotNone(queue.claim(kind="vision"))
+
 
 if __name__ == "__main__":
     unittest.main()

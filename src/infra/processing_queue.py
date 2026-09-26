@@ -111,3 +111,16 @@ class FileJobQueue:
         self._path("processing", job_id).unlink()
         self._write("pending", job)
         return job
+
+    def requeue_failed(self, kind: str | None = None) -> int:
+        moved = 0
+        for path in sorted((self.root / "failed").glob("*.json")):
+            job = json.loads(path.read_text(encoding="utf-8"))
+            if kind is not None and job.get("kind") != kind:
+                continue
+            job.update({"status": "pending", "attempts": 0, "availableAt": _timestamp(_now())})
+            job.pop("failedAt", None)
+            path.unlink()
+            self._write("pending", job)
+            moved += 1
+        return moved
