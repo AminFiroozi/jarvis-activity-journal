@@ -48,10 +48,10 @@ class BuildPromptTests(unittest.TestCase):
             self.assertIn("correspondent", prompt)
             self.assertIn("never quoting message text", prompt)
 
-    def test_format_version_is_four(self):
+    def test_format_version_is_five(self):
         from src.analysis.report_levels import REPORT_FORMAT_VERSION
 
-        self.assertEqual(REPORT_FORMAT_VERSION, "4")
+        self.assertEqual(REPORT_FORMAT_VERSION, "5")
 
     def test_unknown_level_raises(self):
         with self.assertRaises(KeyError):

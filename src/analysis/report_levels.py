@@ -4,7 +4,7 @@ from __future__ import annotations
 
 LEVELS = ("hourly", "daily", "weekly")
 # Bump when the prompt or section layout changes so existing reports are rebuilt.
-REPORT_FORMAT_VERSION = "4"
+REPORT_FORMAT_VERSION = "5"
 
 _SHAPE = """Return only valid JSON with this shape:
 {{

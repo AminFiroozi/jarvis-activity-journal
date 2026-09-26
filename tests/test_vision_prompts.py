@@ -65,8 +65,16 @@ class VisionPromptTests(unittest.TestCase):
 
         for context in ("terminal", "browser", "ide", "unknown"):
             instructions = select_prompt_context(context, prompts)["instructions"]
-            self.assertIn("including a web page in a browser", instructions)
-            self.assertIn("Never transcribe message text verbatim", instructions)
+            for phrase in (
+                "including a web page in a browser",
+                "who said what, in order",
+                "ticket IDs",
+                "still unanswered",
+                "Never transcribe message text verbatim",
+                "Never report phone numbers",
+            ):
+                with self.subTest(context=context, phrase=phrase):
+                    self.assertIn(phrase, instructions)
 
     def test_ocr_missing_optional_dependency_is_failure_safe(self):
         with tempfile.TemporaryDirectory() as directory:

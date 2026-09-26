@@ -1,6 +1,6 @@
 {
   "base": {
-    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so. Do not include secrets: omit passwords, access tokens, API keys, private keys, and other sensitive values. Never transcribe message text verbatim. If the screenshot shows a chat or messaging conversation in any application, including a web page in a browser, follow the messaging guidance for it.",
+    "instructions": "Report observed facts only. Do not infer intent, identity, or unseen content. If something is uncertain, say so. Do not include secrets: omit passwords, access tokens, API keys, private keys, and other sensitive values. Never transcribe message text verbatim. If the screenshot shows a chat or messaging conversation in any application, including a web page in a browser, identify who the conversation is with (contact or group name as shown) and the topic, and give a detailed and precise non-verbatim account in screen_details: who said what, in order (attribute each point to the sender by their displayed name), the questions asked, requests made, decisions reached, deadlines, dates, times and numbers mentioned, ticket IDs, file names and link domains shared, and what is still unanswered. Be specific rather than general. Never report phone numbers, handles, passwords, tokens or attachment contents.",
     "output": {
       "summary": "one concise sentence describing only visible activity",
       "applications": "visible application names",
