@@ -6,7 +6,8 @@
       "applications": "visible application names",
       "projects": "visible project, repository, or website names",
       "activity_type": "coding|browsing|chatting|meeting|media|administration|other",
-      "observations": "short list of directly observed facts"
+      "observations": "short list of directly observed facts",
+      "screen_details": "list of concrete things visible on screen: window and tab titles, page, panel and dashboard names, file, ticket and repository names, terminal commands, and for chat pages the topic and who it is with (never verbatim message text)"
     }
   },
   "contexts": {

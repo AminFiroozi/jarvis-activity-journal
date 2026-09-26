@@ -42,6 +42,13 @@ class VisionPromptTests(unittest.TestCase):
         self.assertNotIn('"confidence"', prompt)
         self.assertNotIn("lower confidence", prompt.lower())
 
+    def test_prompt_schema_asks_for_screen_details(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        prompt = build_prompt("browser", prompts, None)
+
+        self.assertIn('"screen_details"', prompt)
+
     def test_ocr_missing_optional_dependency_is_failure_safe(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "screen.jpg"
