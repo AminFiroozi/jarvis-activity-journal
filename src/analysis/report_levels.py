@@ -4,7 +4,7 @@ from __future__ import annotations
 
 LEVELS = ("hourly", "daily", "weekly")
 # Bump when the prompt or section layout changes so existing reports are rebuilt.
-REPORT_FORMAT_VERSION = "3"
+REPORT_FORMAT_VERSION = "4"
 
 _SHAPE = """Return only valid JSON with this shape:
 {{
@@ -13,7 +13,7 @@ _SHAPE = """Return only valid JSON with this shape:
   "patterns": ["useful observed patterns"]
 }}"""
 
-_RULES = """This is analysis only: describe and interpret what was observed; do not recommend actions or give advice. Report only what the sources show. Do not invent intent, people, conversations, or conclusions. Keep private message content summarized: never quote message text, and omit passwords, tokens and keys. Write plain human-readable text: local times, real application and page names, no identifiers."""
+_RULES = """This is analysis only: describe and interpret what was observed; do not recommend actions or give advice. Report only what the sources show. Do not invent intent, people, conversations, or conclusions. Keep private message content summarized: never quote message text, and omit passwords, tokens and keys. For chat conversations keep the correspondent, the topic and the specific points discussed (questions, requests, decisions, deadlines, numbers, ticket IDs, file names), still never quoting message text. Write plain human-readable text: local times, real application and page names, no identifiers."""
 
 _LEVELS = {
     "hourly": {

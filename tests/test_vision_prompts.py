@@ -49,6 +49,25 @@ class VisionPromptTests(unittest.TestCase):
 
         self.assertIn('"screen_details"', prompt)
 
+    def test_messaging_instructions_ask_for_a_detailed_precise_non_verbatim_account(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        instructions = select_prompt_context("messaging", prompts)["instructions"]
+
+        self.assertIn("who said what, in order", instructions)
+        self.assertIn("ticket IDs", instructions)
+        self.assertIn("still unanswered", instructions)
+        self.assertIn("Do not transcribe message text verbatim", instructions)
+        self.assertIn("phone numbers", instructions)
+
+    def test_chat_guidance_applies_in_every_context_including_browsers(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        for context in ("terminal", "browser", "ide", "unknown"):
+            instructions = select_prompt_context(context, prompts)["instructions"]
+            self.assertIn("including a web page in a browser", instructions)
+            self.assertIn("Never transcribe message text verbatim", instructions)
+
     def test_ocr_missing_optional_dependency_is_failure_safe(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "screen.jpg"

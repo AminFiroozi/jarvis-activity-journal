@@ -42,10 +42,16 @@ class BuildPromptTests(unittest.TestCase):
         self.assertIn("never quote message text", prompt)
         self.assertIn("local times", prompt)
 
-    def test_format_version_is_three(self):
+    def test_prompts_keep_chat_specifics_without_quoting(self):
+        for level in LEVELS:
+            prompt = build_prompt(level)
+            self.assertIn("correspondent", prompt)
+            self.assertIn("never quoting message text", prompt)
+
+    def test_format_version_is_four(self):
         from src.analysis.report_levels import REPORT_FORMAT_VERSION
 
-        self.assertEqual(REPORT_FORMAT_VERSION, "3")
+        self.assertEqual(REPORT_FORMAT_VERSION, "4")
 
     def test_unknown_level_raises(self):
         with self.assertRaises(KeyError):
