@@ -1,4 +1,4 @@
-"""Hourly job: deterministic hourly/weekly journals, refresh llm-context, refresh the LLM daily narrative."""
+"""Hourly job: build the hourly, daily and weekly reports (each compacting the level below), then refresh llm-context."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ def main() -> int:
     args = parser.parse_args()
 
     steps = [
-        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", "hourly", "--date", args.date],
-        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", "weekly", "--date", args.date],
+        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", period, "--date", args.date]
+        for period in ("hourly", "daily", "weekly")
+    ] + [
         [sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date],
-        [sys.executable, "-m", "src.analysis.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date],
     ]
     exit_code = 0
     for step in steps:

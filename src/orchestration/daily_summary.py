@@ -74,6 +74,13 @@ def render_daily_scaffold(journal_root: pathlib.Path, date: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def run_period(args, period: str) -> int:
+    return subprocess.run(
+        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", period, "--date", args.date],
+        cwd=pathlib.Path(__file__).parents[2],
+    ).returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal-root", required=True, type=pathlib.Path)
@@ -83,13 +90,15 @@ def main() -> int:
 
     subprocess.run([sys.executable, "-m", "src.infra.retention", "--journal-root", str(args.journal_root), "--config", str(args.config)], cwd=pathlib.Path(__file__).parents[2])
     subprocess.run([sys.executable, "-m", "src.analysis.analyze_screenshots", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
+    run_period(args, "hourly")
 
     daily_path = args.journal_root / "daily" / f"{args.date}.md"
     daily_path.parent.mkdir(parents=True, exist_ok=True)
     daily_path.write_text(render_daily_scaffold(args.journal_root, args.date), encoding="utf-8")
 
     subprocess.run([sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
-    result = subprocess.run([sys.executable, "-m", "src.analysis.synthesize_journal", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
+    daily_code = run_period(args, "daily")
+    run_period(args, "weekly")
 
     try:
         config = json.loads(args.config.read_text(encoding="utf-8"))
@@ -101,7 +110,7 @@ def main() -> int:
         subprocess.run([sys.executable, "-m", "src.orchestration.sync_entities", "--journal-root", str(args.journal_root), "--config", str(args.config), "--vault-root", str(vault_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
 
     print(str(daily_path))
-    return result.returncode
+    return daily_code
 
 
 if __name__ == "__main__":

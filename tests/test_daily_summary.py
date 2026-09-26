@@ -111,5 +111,30 @@ class DailySummaryVaultRootGatingTests(unittest.TestCase):
             self.assertEqual(len(self._sync_vault_calls(mock_run)), 0)
 
 
+class DailySummaryChainTests(unittest.TestCase):
+    def test_periods_run_hourly_before_daily_before_weekly_and_never_the_old_daily_module(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal_root = root / "journal"
+            journal_root.mkdir()
+            config_path = root / "settings.json"
+            config_path.write_text(json.dumps({}), encoding="utf-8")
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            old_argv = sys.argv
+            sys.argv = ["daily_summary", "--journal-root", str(journal_root), "--config", str(config_path), "--date", "2026-08-30"]
+            try:
+                with patch("src.orchestration.daily_summary.subprocess.run", return_value=mock_result) as mock_run:
+                    exit_code = main()
+            finally:
+                sys.argv = old_argv
+
+            self.assertEqual(exit_code, 0)
+            commands = [call.args[0] for call in mock_run.call_args_list]
+            periods = [command[command.index("--period") + 1] for command in commands if "src.analysis.synthesize_period" in command]
+            self.assertEqual(periods, ["hourly", "daily", "weekly"])
+            self.assertFalse(any("src.analysis.synthesize_journal" in command for command in commands))
+
+
 if __name__ == "__main__":
     unittest.main()
