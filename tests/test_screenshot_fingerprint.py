@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from src.analysis.screenshot_fingerprint import deduplicate_images, fingerprint_image, hamming_distance
+from src.analysis.screenshot_fingerprint import deduplicate_images, deduplicate_with_matches, fingerprint_image, hamming_distance
 
 
 class ScreenshotFingerprintTests(unittest.TestCase):
@@ -31,6 +31,22 @@ class ScreenshotFingerprintTests(unittest.TestCase):
             selected = deduplicate_images([first, second], threshold=4)
 
             self.assertEqual(selected, [first, second])
+
+    def test_deduplication_reports_which_kept_image_each_duplicate_matched(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = Path(directory) / "one.jpg"
+            duplicate = Path(directory) / "two.jpg"
+            different = Path(directory) / "three.jpg"
+            Image.new("RGB", (100, 100), "black").save(first)
+            Image.new("RGB", (100, 100), "black").save(duplicate)
+            image = Image.new("RGB", (100, 100), "black")
+            ImageDraw.Draw(image).rectangle((0, 0, 50, 50), fill="white")
+            image.save(different)
+
+            kept, matches = deduplicate_with_matches([first, duplicate, different], threshold=4)
+
+            self.assertEqual(kept, [first, different])
+            self.assertEqual(matches, {duplicate: first})
 
 
 if __name__ == "__main__":

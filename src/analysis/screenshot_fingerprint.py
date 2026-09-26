@@ -31,17 +31,28 @@ def hamming_distance(first: str, second: str) -> int:
     return sum(left != right for left, right in zip(first, second))
 
 
-def deduplicate_images(images: list[Path], threshold: int = 4) -> list[Path]:
+def deduplicate_with_matches(images: list[Path], threshold: int = 4) -> tuple[list[Path], dict[Path, Path]]:
     selected: list[Path] = []
     fingerprints: list[Fingerprint] = []
+    matches: dict[Path, Path] = {}
     for image in images:
         current = fingerprint_image(image)
-        if any(
-            current.sha256 == previous.sha256
-            or hamming_distance(current.perceptual_hash, previous.perceptual_hash) <= threshold
-            for previous in fingerprints
-        ):
+        matched = next(
+            (
+                index
+                for index, previous in enumerate(fingerprints)
+                if current.sha256 == previous.sha256
+                or hamming_distance(current.perceptual_hash, previous.perceptual_hash) <= threshold
+            ),
+            None,
+        )
+        if matched is not None:
+            matches[image] = selected[matched]
             continue
         selected.append(image)
         fingerprints.append(current)
-    return selected
+    return selected, matches
+
+
+def deduplicate_images(images: list[Path], threshold: int = 4) -> list[Path]:
+    return deduplicate_with_matches(images, threshold)[0]
