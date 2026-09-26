@@ -161,12 +161,61 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             mocked.assert_not_called()
 
     def test_result_is_filed_under_the_screenshots_own_date(self):
+        from src.infra.processing_queue import FileJobQueue
+
         with tempfile.TemporaryDirectory() as directory:
             journal = _make_journal(Path(directory))
+            (journal / "screenshots" / "2026-01-01" / "screen-00-00-00-000.jpg").unlink()
+            older_dir = journal / "screenshots" / "2025-12-31"
+            older_dir.mkdir(parents=True)
+            image = older_dir / "screen-23-59-00-000.jpg"
+            Image.new("RGB", (32, 32), color="white").save(image, "JPEG")
+            FileJobQueue(journal / "queue").enqueue(
+                "vision",
+                {"screenshot": str(image), "date": "2025-12-31", "context": "unknown"},
+                job_id=module.job_id_for(image),
+            )
             with mock.patch.object(module, "call_vision", return_value={"summary": "coding"}):
                 _run(journal)
 
-            self.assertTrue((journal / "raw" / "visual-2026-01-01.jsonl").exists())
+            older = journal / "raw" / "visual-2025-12-31.jsonl"
+            self.assertTrue(older.exists())
+            self.assertEqual(json.loads(older.read_text(encoding="utf-8").splitlines()[0])["screenshot"], str(image))
+            self.assertFalse((journal / "raw" / "visual-2026-01-01.jsonl").exists())
+
+    def test_analysed_screenshot_missing_its_file_is_repaired_without_pending_jobs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            image = journal / "screenshots" / "2026-01-01" / "screen-00-00-00-000.jpg"
+            record = {"timestamp": "2026-01-01T00:00:00+00:00", "source": "screenshot-vision", "screenshot": str(image), "analysis": {"summary": "coding"}}
+            (journal / "raw").mkdir()
+            (journal / "raw" / "visual-2026-01-01.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            with mock.patch.object(module, "call_vision", return_value={"summary": "other"}) as mocked:
+                _run(journal)
+
+            mocked.assert_not_called()
+            target = journal / "screens" / "2026-01-01" / "00" / "00-00-00-000.md"
+            self.assertTrue(target.exists())
+            self.assertIn("coding", target.read_text(encoding="utf-8"))
+
+    def test_duplicate_of_screenshot_analysed_in_earlier_run_is_filed_without_pending_jobs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            screenshot_dir = journal / "screenshots" / "2026-01-01"
+            kept = screenshot_dir / "screen-00-00-00-000.jpg"
+            duplicate = screenshot_dir / "screen-00-01-00-000.jpg"
+            Image.new("RGB", (32, 32), color="white").save(duplicate, "JPEG")
+            record = {"timestamp": "2026-01-01T00:00:00+00:00", "source": "screenshot-vision", "screenshot": str(kept), "analysis": {"summary": "coding"}}
+            (journal / "raw").mkdir()
+            (journal / "raw" / "visual-2026-01-01.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            (journal / "raw" / "screen-dups-2026-01-01.json").write_text(json.dumps({str(duplicate): str(kept)}), encoding="utf-8")
+            with mock.patch.object(module, "call_vision", return_value={"summary": "other"}) as mocked:
+                _run(journal)
+
+            mocked.assert_not_called()
+            target = journal / "screens" / "2026-01-01" / "00" / "00-01-00-000.md"
+            self.assertTrue(target.exists())
+            self.assertIn("Unchanged since 00:00:00.", target.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

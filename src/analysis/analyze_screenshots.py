@@ -14,7 +14,7 @@ import pathlib
 from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 from src.analysis.ocr import extract_text
 from src.infra.processing_queue import FileJobQueue
-from src.analysis.screen_markdown import reconcile_duplicates, screen_path, write_screen_markdown
+from src.analysis.screen_markdown import load_analyses, reconcile_duplicates, screen_path, write_screen_markdown
 from src.analysis.screenshot_fingerprint import deduplicate_with_matches
 from src.infra.heartbeat import write_heartbeat
 
@@ -186,6 +186,13 @@ def main() -> int:
     status = raw_dir / f"visual-{args.date}.status.json"
     all_images = sorted(screenshot_dir.glob("*.jpg"), key=lambda path: path.stat().st_mtime) if screenshot_dir.exists() else []
     analyzed = load_analyzed_screenshots(output)
+    for screenshot, analysis in load_analyses(journal, args.date).items():
+        if screen_path(journal, pathlib.Path(screenshot)).exists():
+            continue
+        try:
+            write_screen_markdown(journal, pathlib.Path(screenshot), analysis)
+        except OSError:
+            continue  # retried on the next run
     reconcile_duplicates(journal, args.date, {})
     candidates = [image for image in all_images if str(image) not in analyzed and not screen_path(journal, image).exists()]
     candidates, duplicates = deduplicate_with_matches(candidates, threshold=max(0, int(screenshot_config.get("dedupeHammingThreshold", 4))))
@@ -240,8 +247,14 @@ def main() -> int:
             for result in items:
                 handle.write(json.dumps(result, ensure_ascii=False) + "\n")
     for result in results:
-        write_screen_markdown(journal, pathlib.Path(result["screenshot"]), result["analysis"])
-    reconcile_duplicates(journal, args.date, {})
+        try:
+            write_screen_markdown(journal, pathlib.Path(result["screenshot"]), result["analysis"])
+        except OSError:
+            continue  # the self-repair pass at the start of the next run retries it
+    try:
+        reconcile_duplicates(journal, args.date, {})
+    except OSError:
+        pass  # duplicate files are retried on the next run
     remaining = sum(1 for _ in (journal / "queue" / "pending").glob("*.json"))
     status.write_text(json.dumps({"date": args.date, "status": "complete" if not failures else "partial", "analyzed": len(results), "failed": failures, "queuedRemaining": remaining}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"analyzed": len(results), "failed": len(failures), "queuedRemaining": remaining, "output": str(output)}))
