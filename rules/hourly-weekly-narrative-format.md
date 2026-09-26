@@ -1,10 +1,10 @@
 ---
-title: Hourly/weekly journals follow daily's narrative format
+title: Hourly/daily/weekly reports share one screen-aware format
 status: active
 added: 2026-08-28
 ---
 
-Hourly and weekly journal Markdown files use the same LLM-narrative style as `daily/<date>.md` — summary paragraph, `### Timeline`, `### Patterns`, `### Next actions`, `_LLM confidence: N_` — instead of the current deterministic session+evidence dump. The narrative replaces the evidence list entirely, matching daily's own format exactly. Hourly stays fine-grained/detailed; weekly stays general and summary-level, covering fewer, broader points.
+Hourly, daily and weekly journal files share one Markdown format — summary paragraph, `### On screen`, `### Timeline`, `### Patterns`, `### Next actions` — differing only in depth: hourly is fine-grained, daily groups by task, weekly stays general. `### On screen` records concrete details of what the vision model saw. Each level is built only from the level below: per-screenshot Markdown files → hourly (plus that hour's active windows) → daily → weekly. No model-reported confidence appears anywhere.
 
-**Why:** Amin said daily's format "looks cool" and asked hourly/weekly to follow it, with hourly more detailed and weekly more general.
-**Scope:** `src/analysis/journalize.py` (`render_journal` and its callers), `src/analysis/build_journals.py`, `src/analysis/synthesize_journal.py` (or whatever shared narrative-writing module replaces/extends it for per-hour and per-week synthesis).
+**Why:** Amin wanted all report levels in one format with screen details, built as a compaction chain, and asked for confidence to be dropped from the project.
+**Scope:** `src/analysis/report_levels.py`, `src/analysis/report_render.py`, `src/analysis/synthesize_period.py`, `src/analysis/screen_markdown.py`, `src/analysis/analyze_screenshots.py`.
