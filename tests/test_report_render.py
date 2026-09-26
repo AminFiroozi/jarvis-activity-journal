@@ -54,6 +54,14 @@ class RenderTests(unittest.TestCase):
         self.assertNotIn("### Patterns", text)
 
 
+    def test_null_time_or_activity_never_renders_as_none(self):
+        text = render_report("T", {"summary": "s", "timeline": [{"time": None, "activity": "did x"}, {"time": "10:00", "activity": None}]})
+
+        self.assertIn("- did x", text)
+        self.assertIn("- 10:00", text)
+        self.assertNotIn("None", text)
+
+
 class DailyTests(unittest.TestCase):
     def test_upsert_keeps_the_scaffold_and_replaces_the_previous_narrative(self):
         scaffold = "# Automatic Activity Journal — 2026-09-26\n\n## Applications\n\n- Code\n"

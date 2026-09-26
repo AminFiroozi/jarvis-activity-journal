@@ -21,7 +21,7 @@ def backfill(journal_root: pathlib.Path) -> int:
                 record = json.loads(line)
                 image = pathlib.Path(record["screenshot"])
                 analysis = record["analysis"]
-            except (json.JSONDecodeError, KeyError):
+            except (json.JSONDecodeError, KeyError, TypeError):
                 continue
             if not isinstance(analysis, dict) or screen_path(journal_root, image).exists():
                 continue

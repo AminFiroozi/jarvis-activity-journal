@@ -135,6 +135,15 @@ class ReconcileDuplicatesTests(unittest.TestCase):
             self.assertEqual(load_analyses(journal, "2026-09-26"), {str(self.kept): ANALYSIS})
             self.assertEqual(load_analyses(journal, "2026-01-01"), {})
 
+    def test_load_analyses_skips_valid_json_lines_that_are_not_objects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "raw").mkdir()
+            good = json.dumps({"screenshot": str(self.kept), "analysis": ANALYSIS})
+            (journal / "raw" / "visual-2026-09-26.jsonl").write_text(f"[]\n5\n{good}\n", encoding="utf-8")
+
+            self.assertEqual(load_analyses(journal, "2026-09-26"), {str(self.kept): ANALYSIS})
+
 
 if __name__ == "__main__":
     unittest.main()

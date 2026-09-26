@@ -10,6 +10,8 @@ import subprocess
 import sys
 from collections import Counter
 
+from src.analysis.report_render import NARRATIVE_MARKER
+
 
 def read_jsonl(path: pathlib.Path) -> list[dict]:
     if not path.exists():
@@ -74,6 +76,13 @@ def render_daily_scaffold(journal_root: pathlib.Path, date: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def keep_existing_narrative(scaffold: str, existing: str) -> str:
+    """Append the existing '## LLM narrative' section (with its input stamp) to a fresh scaffold."""
+    if NARRATIVE_MARKER not in existing:
+        return scaffold
+    return scaffold.rstrip() + "\n\n" + existing[existing.index(NARRATIVE_MARKER):]
+
+
 def run_period(args, period: str) -> int:
     return subprocess.run(
         [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", period, "--date", args.date],
@@ -94,7 +103,8 @@ def main() -> int:
 
     daily_path = args.journal_root / "daily" / f"{args.date}.md"
     daily_path.parent.mkdir(parents=True, exist_ok=True)
-    daily_path.write_text(render_daily_scaffold(args.journal_root, args.date), encoding="utf-8")
+    existing = daily_path.read_text(encoding="utf-8") if daily_path.exists() else ""
+    daily_path.write_text(keep_existing_narrative(render_daily_scaffold(args.journal_root, args.date), existing), encoding="utf-8")
 
     subprocess.run([sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
     daily_code = run_period(args, "daily")

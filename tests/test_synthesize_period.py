@@ -116,6 +116,19 @@ class GatherTests(unittest.TestCase):
             self.assertIn("1 further screenshot(s) were unchanged repeats", text)
             self.assertIn("chrome — Kibana", text)
 
+    def test_screen_unchanged_since_an_earlier_hour_is_kept_once_per_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 14, "14-00-10-000", "Viewing Kibana.\n\nUnchanged since 13:50:00.")
+            _screen(journal, DATE, 14, "14-01-10-000", "Viewing Kibana.\n\nUnchanged since 13:50:00.")
+            _screen(journal, DATE, 14, "14-03-10-000", "Viewing Kibana.\n\nUnchanged since 14:02:00.")
+
+            text = gather_hour(journal, DATE, 14)
+
+            self.assertEqual(text.count("Unchanged since 13:50:00"), 1)
+            self.assertIn("(1 analysed)", text)
+            self.assertIn("1 further screenshot(s) were unchanged repeats", text)
+
     def test_hour_source_text_ignores_the_stamp_comment_in_screen_files(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
@@ -167,6 +180,8 @@ class CallReportModelTests(unittest.TestCase):
         retry_messages = mocked.call_args.args[1]
         self.assertEqual(retry_messages[-1]["role"], "user")
         self.assertIn("not valid JSON", retry_messages[-1]["content"])
+        self.assertNotIn("assistant", [m["role"] for m in retry_messages])
+        self.assertEqual(len(retry_messages), 3)
 
     def test_two_invalid_responses_raise_value_error(self):
         with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="nope"):
@@ -334,6 +349,25 @@ class FitTests(unittest.TestCase):
         self.assertLessEqual(len("\n\n".join(fitted)), 3000)
         self.assertEqual(fitted[0].splitlines()[0], "part 0")
 
+    def test_a_full_day_of_hourly_reports_keeps_every_hour_within_the_limit(self):
+        for count in (8, 12, 16, 20, 24):
+            parts = [f"Hour {i}\n" + ("word " * 400) for i in range(count)]
+            fitted = _fit(parts, 12000)
+            self.assertEqual(len(fitted), count, count)
+            self.assertLessEqual(len("\n\n".join(fitted)), 12000, count)
+
+    def test_parts_without_line_breaks_still_fit_and_keep_every_hour(self):
+        parts = ["z" * 3000 for _ in range(24)]
+        fitted = _fit(parts, 12000)
+        self.assertEqual(len(fitted), 24)
+        self.assertLessEqual(len("\n\n".join(fitted)), 12000)
+
+    def test_sixty_screens_are_thinned_once_and_fit(self):
+        parts = [f"Screen {i}\n" + ("detail " * 200) for i in range(60)]
+        fitted = _fit(parts, 12000)
+        self.assertGreaterEqual(len(fitted), 30)
+        self.assertLessEqual(len("\n\n".join(fitted)), 12000)
+
     def test_shorten_leaves_short_text_alone(self):
         self.assertEqual(_shorten("short", 100), "short")
 
@@ -403,6 +437,20 @@ class MainTests(unittest.TestCase):
 
             self.assertEqual((failed, recovered), (1, 0))
             self.assertTrue((journal / "hourly" / DATE / "09.md").exists())
+
+    def test_malformed_provider_payload_fails_the_report_and_still_writes_the_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            _screen(journal, DATE, 9, "09-05-16-374")
+            config_path = _config(journal)
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", side_effect=IndexError("list index out of range")):
+                exit_code = _run_main(journal, config_path, "hourly")
+
+            self.assertEqual(exit_code, 1)
+            heartbeat = json.loads((journal / "health" / "hourly-synthesis.json").read_text(encoding="utf-8"))
+            self.assertEqual(heartbeat["status"], "failed")
 
     def test_daily_period_uses_the_journal_synthesis_stage(self):
         with tempfile.TemporaryDirectory() as directory:

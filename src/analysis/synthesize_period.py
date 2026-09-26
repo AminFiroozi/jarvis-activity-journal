@@ -8,6 +8,7 @@ import datetime as dt
 import hashlib
 import json
 import pathlib
+import re
 
 from src.analysis.narrative import parse_model_json, truncate
 from src.analysis.report_levels import LEVELS, REPORT_FORMAT_VERSION, build_prompt
@@ -26,8 +27,8 @@ STAGE_KEYS = {"hourly": "hourlySynthesis", "daily": "journalSynthesis", "weekly"
 # The provider allows ~8000 tokens per minute per request (input + output); 12000 chars leaves room for a long answer.
 MAX_INPUT_CHARS = {"hourly": 12000, "daily": 12000, "weekly": 12000}
 MAX_ACTIVITY_LINES = 40
-_REPEAT_MARKER = "\nUnchanged since "
-_MIN_PART_CHARS = 600
+_REPEAT_PATTERN = re.compile(r"\nUnchanged since (\d{2}):(\d{2}):(\d{2})")
+_MIN_PART_CHARS = 300
 _SHORTENED = "[…shortened]"
 
 
@@ -112,11 +113,12 @@ def _shorten(text: str, limit: int) -> str:
 def _fit(parts: list[str], limit: int) -> list[str]:
     if len("\n\n".join(parts)) <= limit:
         return parts
-    per_part = max(_MIN_PART_CHARS, (limit - 2 * len(parts)) // len(parts))
-    parts = [_shorten(part, per_part) for part in parts]
-    while len(parts) > 2 and len("\n\n".join(parts)) > limit:
+    overhead = len(_SHORTENED) + 3  # "\n" + marker + the "\n\n" separator between parts
+    max_parts = max(2, limit // (_MIN_PART_CHARS + overhead))
+    while len(parts) > max_parts:
         parts = parts[::2]
-    return parts
+    per_part = max(_MIN_PART_CHARS, limit // len(parts) - overhead)
+    return [_shorten(part, per_part) for part in parts]
 
 
 def gather_hour(journal_root: pathlib.Path, date: str, hour: int) -> str | None:
@@ -127,12 +129,20 @@ def gather_hour(journal_root: pathlib.Path, date: str, hour: int) -> str | None:
         return None
     screens: list[str] = []
     repeats = 0
+    seen_originals: set[str] = set()
     for file in files:
         text = strip_input_stamp(file.read_text(encoding="utf-8")).strip()
-        if _REPEAT_MARKER in text:
-            repeats += 1
-        else:
+        match = _REPEAT_PATTERN.search(text)
+        if not match:
             screens.append(text)
+        elif int(match.group(1)) != hour:
+            # The original is in an earlier hour, so this hour has no other evidence of the screen:
+            # keep one file per distinct original and skip further duplicates of it.
+            if match.group(0) not in seen_originals:
+                seen_originals.add(match.group(0))
+                screens.append(text)
+        else:
+            repeats += 1
     header = f"Hour {hour:02d}:00 on {date}."
     activity_block = "## Active windows\n\n" + "\n".join(f"- {line}" for line in activity) if activity else ""
     budget = max(MAX_INPUT_CHARS["hourly"] - len(activity_block), 2000)
@@ -171,10 +181,11 @@ def gather_week(journal_root: pathlib.Path, date: str) -> str | None:
 
 
 def call_report_model(provider: dict, level: str, source_text: str) -> dict:
-    messages = [
+    base_messages = [
         {"role": "system", "content": build_prompt(level)},
         {"role": "user", "content": f"Sources:\n{source_text}"},
     ]
+    messages = base_messages
     last_error: Exception | None = None
     for _ in range(2):
         content = call_chat_completions(provider, messages, temperature=0.2)
@@ -182,9 +193,9 @@ def call_report_model(provider: dict, level: str, source_text: str) -> dict:
             return parse_model_json(content)
         except ValueError as error:
             last_error = error
-            messages = messages + [
-                {"role": "assistant", "content": content},
-                {"role": "user", "content": "That was not valid JSON. Return only the corrected JSON object."},
+            # Reuse the original request plus one short nudge; echoing the bad answer would double the input.
+            messages = base_messages + [
+                {"role": "user", "content": "Your previous answer was not valid JSON. Return only the JSON object."},
             ]
     raise ValueError(f"model returned invalid JSON twice: {last_error}")
 
@@ -254,7 +265,7 @@ def main() -> int:
     for hour in hours:
         try:
             result = build_report(provider, journal, level, args.date, hour=hour)
-        except (OSError, ValueError, KeyError, ProviderError) as error:
+        except (OSError, ValueError, KeyError, IndexError, TypeError, ProviderError) as error:
             result = {"status": "failed", "error": str(error)}
         if hour is not None:
             result["hour"] = hour

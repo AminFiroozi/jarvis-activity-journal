@@ -56,11 +56,11 @@ class SummarizeProjectsTests(unittest.TestCase):
 
 
 class BuildEvidenceTests(unittest.TestCase):
-    def test_prefers_the_synthesized_narrative_json(self):
+    def test_reads_the_daily_markdown_narrative(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
-            (journal / "raw").mkdir()
-            (journal / "raw" / "journal-2026-08-23.json").write_text(json.dumps({"summary": "Worked on Mahoura with Dariush."}), encoding="utf-8")
+            (journal / "daily").mkdir()
+            (journal / "daily" / "2026-08-23.md").write_text("# Journal\n\n## LLM narrative\n\nWorked on Mahoura with Dariush.\n", encoding="utf-8")
 
             evidence = build_evidence(journal, "2026-08-23", roster={"people": ["DariushSeif"], "projects": ["Mahoura"]})
 
@@ -76,6 +76,28 @@ class BuildEvidenceTests(unittest.TestCase):
             evidence = build_evidence(journal, "2026-08-23", roster={"people": [], "projects": []})
 
             self.assertIn("Worked on Mahoura.", evidence["narrative"])
+
+    def test_input_stamp_is_not_part_of_the_narrative_and_stale_raw_json_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "daily").mkdir()
+            (journal / "raw").mkdir()
+            (journal / "raw" / "journal-2026-08-23.json").write_text(json.dumps({"summary": "STALE"}), encoding="utf-8")
+            (journal / "daily" / "2026-08-23.md").write_text("# Journal\n\n## LLM narrative\n\nWorked on Mahoura.\n\n<!-- input: abc123 -->\n", encoding="utf-8")
+
+            evidence = build_evidence(journal, "2026-08-23", roster={"people": [], "projects": []})
+
+            self.assertEqual(evidence["narrative"], "Worked on Mahoura.")
+
+    def test_stale_raw_json_alone_gives_no_narrative(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "raw").mkdir()
+            (journal / "raw" / "journal-2026-08-23.json").write_text(json.dumps({"summary": "STALE"}), encoding="utf-8")
+
+            evidence = build_evidence(journal, "2026-08-23", roster={"people": [], "projects": []})
+
+            self.assertIsNone(evidence["narrative"])
 
     def test_narrative_is_none_when_nothing_exists(self):
         with tempfile.TemporaryDirectory() as directory:

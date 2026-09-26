@@ -16,10 +16,10 @@ from src.orchestration.vault_linker import build_name_index, build_note_paths
 
 
 def _write_narrative(journal_root: Path, date: str) -> None:
-    raw = journal_root / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
-    (raw / f"journal-{date}.json").write_text(
-        json.dumps({"summary": "A day of ordinary activity was observed."}),
+    daily = journal_root / "daily"
+    daily.mkdir(parents=True, exist_ok=True)
+    (daily / f"{date}.md").write_text(
+        "# Journal\n\n## LLM narrative\n\nA day of ordinary activity was observed.\n",
         encoding="utf-8",
     )
 

@@ -17,7 +17,7 @@ def _items(value) -> list[str]:
     items = []
     for entry in value:
         if isinstance(entry, dict):
-            text = f"{entry.get('time', '')} — {entry.get('activity', '')}".strip(" —")
+            text = f"{entry.get('time') or ''} — {entry.get('activity') or ''}".strip(" —")
         else:
             text = str(entry).strip()
         if text:

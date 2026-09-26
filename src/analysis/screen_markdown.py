@@ -81,7 +81,7 @@ def load_analyses(journal_root: pathlib.Path, date: str) -> dict[str, dict]:
             record = json.loads(line)
             analysis = record["analysis"]
             screenshot = record["screenshot"]
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, TypeError):
             continue
         if isinstance(analysis, dict):
             analyses[str(screenshot)] = analysis

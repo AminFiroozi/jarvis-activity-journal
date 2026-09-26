@@ -36,6 +36,16 @@ class BackfillTests(unittest.TestCase):
 
             self.assertEqual(backfill(journal), 0)
 
+    def test_valid_json_lines_that_are_not_objects_are_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            image = journal / "screenshots" / "2026-09-26" / "screen-10-21-15-521.jpg"
+            (journal / "raw").mkdir()
+            good = json.dumps({"screenshot": str(image), "analysis": {"summary": "Kibana"}})
+            (journal / "raw" / "visual-2026-09-26.jsonl").write_text(f"[]\n5\n{good}\n", encoding="utf-8")
+
+            self.assertEqual(backfill(journal), 1)
+
 
 class MainTests(unittest.TestCase):
     def test_requeue_failed_flag_moves_vision_jobs(self):

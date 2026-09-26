@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import pathlib
 
+from src.analysis.report_render import daily_narrative_text
 from src.analysis.narrative import compact_event, event_stamp, local_time, read_events, truncate
 from src.providers.model_client import call_chat_completions
 
@@ -58,21 +59,10 @@ def summarize_projects(events: list[dict]) -> list[dict]:
 
 
 def _read_narrative(journal_root: pathlib.Path, date: str) -> str | None:
-    narrative_path = journal_root / "raw" / f"journal-{date}.json"
-    if narrative_path.exists():
-        try:
-            data = json.loads(narrative_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = None
-        if isinstance(data, dict) and data.get("summary"):
-            return str(data["summary"])
     daily_path = journal_root / "daily" / f"{date}.md"
-    if daily_path.exists():
-        content = daily_path.read_text(encoding="utf-8")
-        marker = "## LLM narrative"
-        if marker in content:
-            return content.split(marker, 1)[1].strip()
-    return None
+    if not daily_path.exists():
+        return None
+    return daily_narrative_text(daily_path.read_text(encoding="utf-8"))
 
 
 def build_evidence(journal_root: pathlib.Path, date: str, roster: dict) -> dict:
