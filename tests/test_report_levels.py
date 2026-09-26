@@ -7,8 +7,10 @@ class BuildPromptTests(unittest.TestCase):
     def test_all_levels_share_the_same_json_shape(self):
         for level in LEVELS:
             prompt = build_prompt(level)
-            for key in ('"summary"', '"on_screen"', '"timeline"', '"patterns"'):
+            for key in ('"summary"', '"timeline"', '"patterns"'):
                 self.assertIn(key, prompt)
+            self.assertNotIn('"on_screen"', build_prompt(level))
+            self.assertNotIn("On screen", build_prompt(level))
 
     def test_prompt_asks_for_analysis_only_and_has_no_next_actions(self):
         for level in LEVELS:
@@ -25,11 +27,13 @@ class BuildPromptTests(unittest.TestCase):
         hourly, daily, weekly = (build_prompt(level) for level in LEVELS)
 
         self.assertIn("one hour", hourly)
-        self.assertIn("every distinct screen", hourly)
+        self.assertIn("concrete names", hourly)
         self.assertIn("one day", daily)
         self.assertIn("hourly reports", daily)
         self.assertIn("one week", weekly)
         self.assertIn("daily reports", weekly)
+        self.assertIn("longer and richer than an hourly report", daily)
+        self.assertIn("longer than a daily report", weekly)
         self.assertEqual(len({hourly, daily, weekly}), 3)
 
     def test_privacy_and_readability_rules_are_stated(self):
@@ -37,6 +41,11 @@ class BuildPromptTests(unittest.TestCase):
 
         self.assertIn("never quote message text", prompt)
         self.assertIn("local times", prompt)
+
+    def test_format_version_is_three(self):
+        from src.analysis.report_levels import REPORT_FORMAT_VERSION
+
+        self.assertEqual(REPORT_FORMAT_VERSION, "3")
 
     def test_unknown_level_raises(self):
         with self.assertRaises(KeyError):

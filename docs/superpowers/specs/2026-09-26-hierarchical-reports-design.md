@@ -1,6 +1,6 @@
 # Hierarchical Screen-Aware Reports — Design
 
-**Goal:** every screenshot's vision analysis is saved as its own Markdown file describing what the model saw on screen. The hourly report compacts that hour's screenshot files, the daily report compacts that day's hourly reports, and the weekly report compacts that week's daily reports. All levels share one format and differ only in depth of detail.
+**Goal:** every screenshot's vision analysis is saved as its own Markdown file describing what the model saw on screen. The hourly report compacts that hour's screenshot files, the daily report compacts that day's hourly reports, and the weekly report compacts that week's daily reports. All levels share one format (summary, Timeline, Patterns) and grow longer as the period grows.
 
 **Non-goals:** changing collectors, the screenshot queue, retention, or the Obsidian vault entity logic; adding new LLM providers; transcribing chat text verbatim (existing rules still hold).
 
@@ -17,7 +17,7 @@
 
 - Per-screenshot Markdown is rendered by plain code from the vision JSON — no second LLM call. The vision prompt is enriched with a `screen_details` field.
 - Hourly input = that hour's screenshot Markdown files **plus** a compact activity/window summary (covers hours with no analysed screenshot). Daily reads only that day's hourly files. Weekly reads only that week's daily narratives. Neither reads raw events.
-- One shared skeleton: summary paragraph, `### On screen`, `### Timeline`, `### Patterns`. Reports are analysis only: no `### Next actions` or any recommended actions. Accomplishments and Blockers are dropped from daily so all three match. There is no confidence value anywhere in this format.
+- One shared skeleton: summary paragraph, `### Timeline`, `### Patterns` (no `### On screen`: that section exists only in the per-screenshot files). Reports may be long, growing with the period: a daily report is longer than an hourly one and a weekly longer than a daily. Input to each level is capped at 12000 characters because the provider allows about 8000 tokens per minute per request (input + output); `_fit` shortens every long part at a line boundary before it drops any part. Reports are analysis only: no `### Next actions` or any recommended actions. Accomplishments and Blockers are dropped from daily so all three match. There is no confidence value anywhere in this format.
 - Depth: hourly lists every distinct screen; daily groups by task/app; weekly keeps the few notable themes.
 - **Every screenshot gets its own Markdown file.** Near-identical screenshots that dedupe currently skips get a file too: it copies the matched screen's on-screen details, marked "unchanged since HH:MM:SS", with no extra LLM call.
 - **Confidence is removed** wherever a model reports it: vision output and prompts, the report line, and entity notes. Entity ranking and dedupe use evidence count instead, and `minConfidence` is dropped. Internal computed scores that are not model opinions (session classification in `sessionize.py`, OCR box confidence in `ocr.py`) stay.
@@ -77,7 +77,7 @@ Temp directories, no network, extending existing suites where they exist:
 
 ## Rules
 
-`rules/hourly-weekly-narrative-format.md` is updated to describe the chain and the shared format with the On screen section — draft shown to Amin for approval before it is written.
+`rules/hourly-weekly-narrative-format.md` is updated to describe the chain and the shared format with the summary, Timeline, Patterns format — draft shown to Amin for approval before it is written.
 
 ## Out of scope / risks
 

@@ -4,13 +4,12 @@ from __future__ import annotations
 
 LEVELS = ("hourly", "daily", "weekly")
 # Bump when the prompt or section layout changes so existing reports are rebuilt.
-REPORT_FORMAT_VERSION = "2"
+REPORT_FORMAT_VERSION = "3"
 
 _SHAPE = """Return only valid JSON with this shape:
 {{
-  "summary": "one concise factual paragraph",
-  "on_screen": ["concrete things that were visible on screen: applications, pages, dashboards, tickets, files, terminal commands, chat topics"],
-  "timeline": [{{"time": "{time_hint}", "activity": "what was observed"}}],
+  "summary": "a factual analysis of the period, as long as the sources warrant (one or more paragraphs)",
+  "timeline": [{{"time": "{time_hint}", "activity": "what was seen and done, with concrete names"}}],
   "patterns": ["useful observed patterns"]
 }}"""
 
@@ -21,19 +20,19 @@ _LEVELS = {
         "unit": "one hour",
         "sources": "per-screenshot notes describing what was on screen, plus a list of the active windows for that hour",
         "time_hint": "HH:MM",
-        "depth": "Be specific and fine-grained. List every distinct screen in on_screen with the visible application, page, panel, file, ticket, dashboard or command names and other concrete details. Follow the actual sequence in the timeline, noting when the screen changed.",
+        "depth": "Be thorough and specific: this report may be long. The timeline follows the actual sequence of the hour in detail — for each change of screen say what was open (application, page, dashboard, ticket, file, command, chat topic) and what the person appeared to be doing. Prefer concrete names over generalities.",
     },
     "daily": {
         "unit": "one day",
         "sources": "the hourly reports of that day",
         "time_hint": "HH:MM",
-        "depth": "Group the day by task or application. on_screen lists the main things seen in each block of work, not every screen. The timeline has one entry per block of work. Say how many hours the sources cover if the day is incomplete.",
+        "depth": "Write a full analysis of the day, longer and richer than an hourly report. The summary may run to several paragraphs. The timeline has one detailed entry per block of work, naming the concrete applications, pages, tickets and files involved. Patterns cover how the day was spent. Say how many hours the sources cover if the day is incomplete.",
     },
     "weekly": {
         "unit": "one week",
         "sources": "the daily reports of that week",
         "time_hint": "weekday and date, e.g. Tue 2026-09-22",
-        "depth": "Stay general. on_screen names only the few notable screens or themes of the week. The timeline holds only the week's most significant moments. Do not merge the daily reports into a log.",
+        "depth": "Write a full analysis of the week, longer than a daily report. The summary may run to several paragraphs covering the week's themes. The timeline holds the week's significant moments by day. Patterns cover how the week was spent across days.",
     },
 }
 

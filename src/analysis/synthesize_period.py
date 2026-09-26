@@ -23,9 +23,12 @@ from src.infra.heartbeat import write_heartbeat
 from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 
 STAGE_KEYS = {"hourly": "hourlySynthesis", "daily": "journalSynthesis", "weekly": "weeklySynthesis"}
-MAX_INPUT_CHARS = {"hourly": 24000, "daily": 16000, "weekly": 16000}
+# The provider allows ~8000 tokens per minute per request (input + output); 12000 chars leaves room for a long answer.
+MAX_INPUT_CHARS = {"hourly": 12000, "daily": 12000, "weekly": 12000}
 MAX_ACTIVITY_LINES = 40
 _REPEAT_MARKER = "\nUnchanged since "
+_MIN_PART_CHARS = 600
+_SHORTENED = "[…shortened]"
 
 
 def week_dates(date: str) -> tuple[int, int, list[str]]:
@@ -96,7 +99,21 @@ def hours_with_input(journal_root: pathlib.Path, date: str) -> list[int]:
     return sorted(hours)
 
 
+def _shorten(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    newline = cut.rfind("\n")
+    if newline > limit // 2:
+        cut = cut[:newline]
+    return cut.rstrip() + "\n" + _SHORTENED
+
+
 def _fit(parts: list[str], limit: int) -> list[str]:
+    if len("\n\n".join(parts)) <= limit:
+        return parts
+    per_part = max(_MIN_PART_CHARS, (limit - 2 * len(parts)) // len(parts))
+    parts = [_shorten(part, per_part) for part in parts]
     while len(parts) > 2 and len("\n\n".join(parts)) > limit:
         parts = parts[::2]
     return parts
@@ -118,7 +135,7 @@ def gather_hour(journal_root: pathlib.Path, date: str, hour: int) -> str | None:
             screens.append(text)
     header = f"Hour {hour:02d}:00 on {date}."
     activity_block = "## Active windows\n\n" + "\n".join(f"- {line}" for line in activity) if activity else ""
-    budget = MAX_INPUT_CHARS["hourly"] - len(activity_block)
+    budget = max(MAX_INPUT_CHARS["hourly"] - len(activity_block), 2000)
     parts = [header, f"## Screens ({len(screens)} analysed)"] + _fit(screens, budget)
     if repeats:
         parts.append(f"{repeats} further screenshot(s) were unchanged repeats of the screens above.")

@@ -25,11 +25,12 @@ class RenderTests(unittest.TestCase):
         text = render_report("Hourly journal — 2026-09-26 09:00", NARRATIVE)
 
         self.assertTrue(text.startswith("# Hourly journal — 2026-09-26 09:00\n\nWorked on the pipeline.\n"))
-        order = [text.index(heading) for heading in ("### On screen", "### Timeline", "### Patterns")]
+        order = [text.index(heading) for heading in ("### Timeline", "### Patterns")]
         self.assertEqual(order, sorted(order))
         self.assertNotIn("Next actions", text)
         self.assertNotIn("Write tests", text)
-        self.assertIn("- Kibana dashboard kassa-log", text)
+        self.assertNotIn("On screen", text)
+        self.assertNotIn("Kibana dashboard kassa-log", text)
         self.assertIn("- 09:15 — Started coding", text)
 
     def test_no_confidence_line_and_no_legacy_sections(self):
@@ -48,7 +49,7 @@ class RenderTests(unittest.TestCase):
     def test_bare_string_sections_and_string_timeline_entries_are_tolerated(self):
         text = render_report("T", {"summary": "s", "on_screen": "One screen", "timeline": ["10:00 something"], "patterns": None})
 
-        self.assertIn("- One screen", text)
+        self.assertNotIn("One screen", text)
         self.assertIn("- 10:00 something", text)
         self.assertNotIn("### Patterns", text)
 

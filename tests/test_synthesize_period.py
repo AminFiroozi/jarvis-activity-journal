@@ -7,8 +7,11 @@ from unittest import mock
 
 from src.analysis.report_render import NARRATIVE_MARKER, read_input_stamp
 from src.analysis.synthesize_period import (
+    MAX_INPUT_CHARS,
     STAGE_KEYS,
     activity_lines,
+    _fit,
+    _shorten,
     build_report,
     call_report_model,
     gather_day,
@@ -191,7 +194,7 @@ class BuildReportTests(unittest.TestCase):
             self.assertEqual(result, {"status": "complete", "path": str(path)})
             text = path.read_text(encoding="utf-8")
             self.assertTrue(text.startswith("# Hourly journal — 2026-09-26 10:00\n\nWorked on dashboards.\n"))
-            self.assertIn("### On screen", text)
+            self.assertNotIn("### On screen", text)
             self.assertIsNotNone(read_input_stamp(text))
             self.assertNotIn("confidence", text.lower())
             self.assertNotIn("Next actions", text)
@@ -257,7 +260,7 @@ class BuildReportTests(unittest.TestCase):
             self.assertEqual(result["status"], "complete")
             self.assertIn("## Applications", text)
             self.assertIn(NARRATIVE_MARKER, text)
-            self.assertIn("### On screen", text)
+            self.assertNotIn("### On screen", text)
             self.assertIsNotNone(read_input_stamp(text))
 
     def test_daily_rewritten_by_the_scaffold_is_rebuilt_even_if_input_is_unchanged(self):
@@ -302,6 +305,40 @@ def _run_main(journal: Path, config_path: Path, period: str, date: str = DATE) -
         return main()
     finally:
         sys.argv = old_argv
+
+
+class FitTests(unittest.TestCase):
+    def test_input_within_the_limit_is_returned_unchanged(self):
+        parts = ["a" * 100, "b" * 100]
+        self.assertEqual(_fit(parts, 1000), parts)
+
+    def test_long_parts_are_shortened_at_a_line_boundary_and_all_are_kept(self):
+        line = "x" * 99 + "\n"
+        parts = [line * 40, line * 40, line * 40]
+
+        fitted = _fit(parts, 3000)
+
+        self.assertEqual(len(fitted), 3)
+        for part in fitted:
+            self.assertLess(len(part), len(parts[0]))
+            self.assertTrue(part.endswith("[…shortened]"))
+        self.assertLessEqual(len("\n\n".join(fitted)), 3000)
+
+    def test_many_parts_are_thinned_when_shortening_alone_is_not_enough(self):
+        parts = [f"part {i}\n" + "y" * 800 for i in range(30)]
+
+        fitted = _fit(parts, 3000)
+
+        self.assertLess(len(fitted), 30)
+        self.assertGreaterEqual(len(fitted), 2)
+        self.assertLessEqual(len("\n\n".join(fitted)), 3000)
+        self.assertEqual(fitted[0].splitlines()[0], "part 0")
+
+    def test_shorten_leaves_short_text_alone(self):
+        self.assertEqual(_shorten("short", 100), "short")
+
+    def test_every_level_input_cap_fits_the_provider_token_limit(self):
+        self.assertEqual(MAX_INPUT_CHARS, {"hourly": 12000, "daily": 12000, "weekly": 12000})
 
 
 class MainTests(unittest.TestCase):
