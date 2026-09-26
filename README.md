@@ -1,16 +1,19 @@
 # Jarvis Activity Journal
 
-Local-first, cross-platform activity collection and journal generation. It captures structured activity metadata, optional focused-window text, and optional full-desktop screenshots. A configurable vision model converts representative screenshots into structured activity events; a configurable text model turns the day's events into a narrative journal. Both models can be local (LM Studio, Ollama, any OpenAI-compatible server) or a cloud API — chosen per stage via `config/settings.json`.
+Local-first, cross-platform activity collection and journal generation. It captures structured activity metadata, optional focused-window text, and optional full-desktop screenshots. A configurable vision model converts representative screenshots into structured activity events, one Markdown file per screenshot; a configurable text model compacts those into hourly, daily and weekly journal reports. Both models can be local (LM Studio, Ollama, any OpenAI-compatible server) or a cloud API — chosen per stage via `config/settings.json`.
 
 Pure Python throughout. Tested on Windows; Linux is supported via X11 (window title + idle time) with an honest gap on Wayland and on focused-content capture, documented below.
 
 ## Architecture
 
 ```text
-Screenshot → vision model  → visual activity JSON        (Journal/raw/visual-DATE.jsonl)
-All events → text model    → daily journal narrative      (Journal/daily/DATE.md, "LLM narrative" section)
-All events → text model    → hourly/weekly journal narrative (Journal/hourly/DATE/HH.md, Journal/weekly/YYYY-Www.md)
+Screenshot → vision model → raw/visual-DATE.jsonl + screens/DATE/HH/<time>.md   (one Markdown file per screenshot)
+Hour's screen files + active windows → text model → hourly/DATE/HH.md
+Day's hourly reports                 → text model → daily/DATE.md ("## LLM narrative" section)
+Week's daily reports                 → text model → weekly/YYYY-Www.md
 ```
+
+Hourly, daily and weekly reports share one format (summary, On screen, Timeline, Patterns, Next actions) and differ only in depth: hourly is fine-grained, daily groups by task, weekly stays general. Each level is built only from the level below. Each report stores a hidden `<!-- input: … -->` stamp of what it was built from and is rebuilt only when those inputs change, so a failed run leaves the report stale and the next run retries it automatically. Near-identical screenshots that the dedupe step skips still get a screen file, marked "Unchanged since HH:MM:SS", copied from the screen they matched without another model call. There is no model-reported confidence anywhere.
 
 Everything that isn't a model call — capture, redaction, JSONL storage, deterministic Markdown, scheduling — is plain Python with no network access.
 
@@ -114,15 +117,19 @@ Every collectors.projectEvidence.intervalSeconds (default 15 min)
 Every screenshotAnalyzer.intervalSeconds (default 15 min)
   `- analysis/analyze_screenshots.py -> deduped screenshots enqueued to Journal/queue/
                                         -> up to maxScreenshotsPerRun drained per run -> vision model
-                                        -> Journal/raw/visual-DATE.jsonl
+                                        -> Journal/raw/visual-DATE.jsonl (filed under the screenshot's own date)
+                                        -> Journal/screens/DATE/HH/<HH-MM-SS-mmm>.md (one file per screenshot, duplicates included)
                                         (per-screenshot prompt picked from the app active at capture time)
 
 Every hourlyBuild.intervalSeconds (default 1h)
-  |- analysis/synthesize_period.py  -> text model -> Journal/hourly/DATE/HH.md and Journal/weekly/YYYY-Www.md
-  |                                    (an hour with zero evidence — no events, no screenshot — is skipped, not synthesized;
-  |                                    a failed call is queued in Journal/queue-period/ and retried on the next run)
-  |- analysis/build_llm_context.py  -> Journal/llm-context/latest.md (raw evidence feed for an LLM assistant)
-  `- analysis/synthesize_journal.py -> text model -> Journal/daily/DATE.md ("LLM narrative" section)
+  |- analysis/synthesize_period.py --period hourly -> text model -> Journal/hourly/DATE/HH.md
+  |                                    (every hour of the date with input is checked; an hour with zero evidence — no screen
+  |                                    file, no window events — is skipped; an unchanged hour costs no model call)
+  |- analysis/synthesize_period.py --period daily  -> text model -> Journal/daily/DATE.md ("LLM narrative" section)
+  |- analysis/synthesize_period.py --period weekly -> text model -> Journal/weekly/YYYY-Www.md
+  |                                    (each report is rebuilt only when its input stamp changes; a failed call
+  |                                    leaves the file stale, so the next run retries it)
+  `- analysis/build_llm_context.py  -> Journal/llm-context/latest.md (raw evidence feed for an LLM assistant)
 
 At logon
   |- orchestration/run_now.py             -> one collection pass immediately
@@ -137,7 +144,9 @@ On constrained hardware a single vision-analysis run over a dozen screenshots ca
 
 ### Durable retry queue
 
-Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/infra/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.ops.dashboard` exposes queue depth per state, and `python -m src.ops.doctor` flags dead-lettered jobs. Hourly and weekly narrative synthesis use the same pattern against a separate queue root, `Journal/queue-period/` — a failed LLM call is queued and retried on the next hourly run rather than lost; the dashboard's `queuePeriod` key and doctor's `queue-period-failed` check cover this second queue the same way as `queue/`.
+Every captured screenshot is enqueued once (`Journal/queue/pending/`, a durable file-backed job per screenshot — `src/infra/processing_queue.py`) before it's ever sent to a model. If a vision call fails — no internet, provider down, rate-limited, proxy unreachable — the job goes back to `pending` with exponential backoff (`journalSynthesis`'s and `screenshotAnalyzer`'s config: `maxAttempts`, `retryDelaySeconds`) instead of being dropped; the screenshot data isn't lost, it just waits for a later run when connectivity is back. After `maxAttempts` failures a job moves to `Journal/queue/failed/` (dead letter) rather than retrying forever. `python -m src.ops.dashboard` exposes queue depth per state, and `python -m src.ops.doctor` flags dead-lettered jobs. Hourly, daily and weekly reports do not use a queue: a failed text-model call leaves the report stale (its input stamp no longer matches), so the next run rebuilds it. The dashboard's `queuePeriod` key and doctor's `queue-period-failed` check still read the legacy `Journal/queue-period/` directory from earlier versions; current reports never write to it.
+
+To bring a journal created before the per-screenshot files existed up to date, run `python -m src.ops.migrate_screens --journal-root /path/to/Journal --backfill --requeue-failed`. `--backfill` writes screen files for screenshots already analysed in `raw/visual-*.jsonl`; `--requeue-failed` moves dead-lettered vision jobs in `Journal/queue/failed/` back to `pending`. Existing hourly, daily and weekly files rebuild once on the next run because they have no input stamp yet.
 
 ## Verification
 
@@ -161,9 +170,11 @@ src/
     capture.py             full-desktop screenshot, deduped at capture time
     project_evidence.py    git evidence for configured project paths
   analysis/         vision/text model calls and deterministic rendering
-    analyze_screenshots.py  screenshots -> vision model -> visual-DATE.jsonl
-    synthesize_journal.py   events -> text model -> daily narrative
-    synthesize_period.py    events -> text model -> hourly + weekly narrative, queue-backed retry
+    analyze_screenshots.py  screenshots -> vision model -> visual-DATE.jsonl + a screen file per screenshot
+    screen_markdown.py      renders screens/DATE/HH/<time>.md from a vision result (no model call)
+    synthesize_period.py    --period hourly|daily|weekly -> text model -> the report chain, rebuilt only when inputs change
+    report_levels.py        shared prompt and per-level depth for the three report levels
+    report_render.py        shared renderer and input-stamp helpers for the report format
     sessionize.py            activity-session classification (no model call)
     build_llm_context.py     llm-context/latest.md, raw evidence for an LLM assistant
     ocr.py, screenshot_fingerprint.py   OCR and perceptual-hash helpers
@@ -176,6 +187,7 @@ src/
     run_now.py, run_hourly.py, daily_summary.py, start_vision_service.py
     install.py, uninstall.py           cross-platform scheduler registration
   ops/                doctor.py, dashboard.py — diagnostics and a localhost status endpoint
+                      migrate_screens.py — one-shot backfill of screen files and requeue of dead-lettered vision jobs
 
 config/
   settings.example.json   full configuration template; copy to your journal root
