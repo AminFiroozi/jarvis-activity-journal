@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -117,6 +118,55 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
             self.assertEqual(heartbeat["status"], "failed")
             self.assertEqual(heartbeat["itemsProcessed"], 0)
+
+    def test_successful_analysis_writes_a_markdown_file_for_the_screenshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            analysis = {"summary": "coding", "screen_details": ["editor shows main.py"]}
+            with mock.patch.object(module, "call_vision", return_value=analysis):
+                _run(journal)
+
+            target = journal / "screens" / "2026-01-01" / "00" / "00-00-00-000.md"
+            self.assertTrue(target.exists())
+            text = target.read_text(encoding="utf-8")
+            self.assertIn("coding", text)
+            self.assertIn("- editor shows main.py", text)
+
+    def test_near_duplicate_screenshot_gets_an_unchanged_file_without_a_second_call(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            screenshot_dir = journal / "screenshots" / "2026-01-01"
+            first = screenshot_dir / "screen-00-00-00-000.jpg"
+            second = screenshot_dir / "screen-00-01-00-000.jpg"
+            Image.new("RGB", (32, 32), color="white").save(second, "JPEG")
+            os.utime(first, (1000, 1000))
+            os.utime(second, (2000, 2000))
+            with mock.patch.object(module, "call_vision", return_value={"summary": "coding"}) as mocked:
+                _run(journal)
+
+            self.assertEqual(mocked.call_count, 1)
+            duplicate = journal / "screens" / "2026-01-01" / "00" / "00-01-00-000.md"
+            self.assertTrue(duplicate.exists())
+            self.assertIn("Unchanged since 00:00:00.", duplicate.read_text(encoding="utf-8"))
+
+    def test_screenshot_that_already_has_a_file_is_not_queued_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            existing = journal / "screens" / "2026-01-01" / "00" / "00-00-00-000.md"
+            existing.parent.mkdir(parents=True)
+            existing.write_text("# Screen\n", encoding="utf-8")
+            with mock.patch.object(module, "call_vision", return_value={"summary": "coding"}) as mocked:
+                _run(journal)
+
+            mocked.assert_not_called()
+
+    def test_result_is_filed_under_the_screenshots_own_date(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            with mock.patch.object(module, "call_vision", return_value={"summary": "coding"}):
+                _run(journal)
+
+            self.assertTrue((journal / "raw" / "visual-2026-01-01.jsonl").exists())
 
 
 if __name__ == "__main__":
