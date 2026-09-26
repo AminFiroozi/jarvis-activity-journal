@@ -194,6 +194,7 @@ class BuildReportTests(unittest.TestCase):
             self.assertIn("### On screen", text)
             self.assertIsNotNone(read_input_stamp(text))
             self.assertNotIn("confidence", text.lower())
+            self.assertNotIn("Next actions", text)
 
     def test_unchanged_input_skips_the_model_and_changed_input_rebuilds(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -209,6 +210,18 @@ class BuildReportTests(unittest.TestCase):
                 third = build_report(PROVIDER, journal, "hourly", DATE, hour=10)
                 self.assertEqual(third["status"], "complete")
                 self.assertEqual(mocked.call_count, 2)
+
+    def test_changing_the_report_format_version_rebuilds_an_unchanged_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 10, "10-21-15-521")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED) as mocked:
+                build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+                with mock.patch("src.analysis.synthesize_period.REPORT_FORMAT_VERSION", "next"):
+                    result = build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(mocked.call_count, 2)
 
     def test_no_input_writes_nothing_and_never_calls_the_model(self):
         with tempfile.TemporaryDirectory() as directory:

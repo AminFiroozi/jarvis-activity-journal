@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 LEVELS = ("hourly", "daily", "weekly")
+# Bump when the prompt or section layout changes so existing reports are rebuilt.
+REPORT_FORMAT_VERSION = "2"
 
 _SHAPE = """Return only valid JSON with this shape:
 {{
   "summary": "one concise factual paragraph",
   "on_screen": ["concrete things that were visible on screen: applications, pages, dashboards, tickets, files, terminal commands, chat topics"],
   "timeline": [{{"time": "{time_hint}", "activity": "what was observed"}}],
-  "patterns": ["useful observed patterns"],
-  "next_actions": ["reasonable next actions grounded in the sources, if any"]
+  "patterns": ["useful observed patterns"]
 }}"""
 
-_RULES = """Report only what the sources show. Do not invent intent, people, conversations, or conclusions. Keep private message content summarized: never quote message text, and omit passwords, tokens and keys. Write plain human-readable text: local times, real application and page names, no identifiers."""
+_RULES = """This is analysis only: describe and interpret what was observed; do not recommend actions or give advice. Report only what the sources show. Do not invent intent, people, conversations, or conclusions. Keep private message content summarized: never quote message text, and omit passwords, tokens and keys. Write plain human-readable text: local times, real application and page names, no identifiers."""
 
 _LEVELS = {
     "hourly": {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 NARRATIVE_MARKER = "## LLM narrative"
-SECTIONS = (("On screen", "on_screen"), ("Timeline", "timeline"), ("Patterns", "patterns"), ("Next actions", "next_actions"))
+SECTIONS = (("On screen", "on_screen"), ("Timeline", "timeline"), ("Patterns", "patterns"))
 _STAMP = re.compile(r"\s*<!-- input: ([0-9a-f]+) -->\s*")
 
 

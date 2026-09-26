@@ -7,8 +7,15 @@ class BuildPromptTests(unittest.TestCase):
     def test_all_levels_share_the_same_json_shape(self):
         for level in LEVELS:
             prompt = build_prompt(level)
-            for key in ('"summary"', '"on_screen"', '"timeline"', '"patterns"', '"next_actions"'):
+            for key in ('"summary"', '"on_screen"', '"timeline"', '"patterns"'):
                 self.assertIn(key, prompt)
+
+    def test_prompt_asks_for_analysis_only_and_has_no_next_actions(self):
+        for level in LEVELS:
+            prompt = build_prompt(level)
+            self.assertNotIn("next_actions", prompt)
+            self.assertNotIn("next actions", prompt.lower())
+            self.assertIn("analysis only", prompt)
 
     def test_no_level_asks_for_confidence(self):
         for level in LEVELS:

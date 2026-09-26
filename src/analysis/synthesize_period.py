@@ -10,7 +10,7 @@ import json
 import pathlib
 
 from src.analysis.narrative import parse_model_json, truncate
-from src.analysis.report_levels import LEVELS, build_prompt
+from src.analysis.report_levels import LEVELS, REPORT_FORMAT_VERSION, build_prompt
 from src.analysis.report_render import (
     daily_narrative_text,
     read_input_stamp,
@@ -188,7 +188,7 @@ def build_report(provider: dict, journal_root: pathlib.Path, level: str, date: s
         title = f"Weekly journal — {year}-W{week:02d}"
     if source is None:
         return {"status": "no-input"}
-    digest = hashlib.sha1(source.encode("utf-8")).hexdigest()[:12]
+    digest = hashlib.sha1((REPORT_FORMAT_VERSION + "\n" + source).encode("utf-8")).hexdigest()[:12]
     existing = path.read_text(encoding="utf-8") if path.exists() else ""
     if read_input_stamp(existing) == digest:
         return {"status": "unchanged", "path": str(path)}
