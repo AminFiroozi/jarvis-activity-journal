@@ -34,6 +34,48 @@ class VisionPromptTests(unittest.TestCase):
         self.assertIn("observed facts", prompt.lower())
         self.assertIn("do not include secrets", prompt.lower())
 
+    def test_prompt_schema_has_no_confidence_field(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        prompt = build_prompt("browser", prompts, None)
+
+        self.assertNotIn('"confidence"', prompt)
+        self.assertNotIn("lower confidence", prompt.lower())
+
+    def test_prompt_schema_asks_for_screen_details(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        prompt = build_prompt("browser", prompts, None)
+
+        self.assertIn('"screen_details"', prompt)
+
+    def test_messaging_instructions_ask_for_a_detailed_precise_non_verbatim_account(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        instructions = select_prompt_context("messaging", prompts)["instructions"]
+
+        self.assertIn("who said what, in order", instructions)
+        self.assertIn("ticket IDs", instructions)
+        self.assertIn("still unanswered", instructions)
+        self.assertIn("Do not transcribe message text verbatim", instructions)
+        self.assertIn("phone numbers", instructions)
+
+    def test_chat_guidance_applies_in_every_context_including_browsers(self):
+        prompts = load_prompts(Path(__file__).parents[1] / "config" / "prompts.json")
+
+        for context in ("terminal", "browser", "ide", "unknown"):
+            instructions = select_prompt_context(context, prompts)["instructions"]
+            for phrase in (
+                "including a web page in a browser",
+                "who said what, in order",
+                "ticket IDs",
+                "still unanswered",
+                "Never transcribe message text verbatim",
+                "Never report phone numbers",
+            ):
+                with self.subTest(context=context, phrase=phrase):
+                    self.assertIn(phrase, instructions)
+
     def test_ocr_missing_optional_dependency_is_failure_safe(self):
         with tempfile.TemporaryDirectory() as directory:
             image = Path(directory) / "screen.jpg"

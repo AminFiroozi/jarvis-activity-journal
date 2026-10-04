@@ -98,11 +98,11 @@ def render_companion_header(stem: str, category: str) -> str:
     )
 
 
-def render_entry(date: str, note: str, evidence: list[str], confidence: float) -> str:
+def render_entry(date: str, note: str, evidence: list[str]) -> str:
     lines = [f"## {date}", "", note.strip(), ""]
     if evidence:
         lines.append(f"_Evidence: {'; '.join(evidence)}_")
-    lines.append(f"_Source: [[Journal/Daily/{date}|daily journal]] · confidence: {confidence}_")
+    lines.append(f"_Source: [[Journal/Daily/{date}|daily journal]]_")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -159,7 +159,6 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
     raw_path.write_text(json.dumps(raw_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     validated = validate_facts(raw_payload)
-    min_confidence = float(stage_config.get("minConfidence", 0.0))
     max_per_day = int(stage_config.get("maxEntitiesPerDay", 5))
 
     written: list[dict] = []
@@ -167,24 +166,21 @@ def sync_entities(journal_root: pathlib.Path, vault_root: pathlib.Path, config: 
     for category in ("people", "projects"):
         resolved: dict[pathlib.Path, dict] = {}
         for entry in validated[category]:
-            if entry["confidence"] < min_confidence:
-                skipped.append({"name": entry["name"], "category": category, "reason": "below-min-confidence"})
-                continue
             note_path = resolve_note_name(entry["name"], index, note_paths, category, vault_root)
             if note_path is None:
                 skipped.append({"name": entry["name"], "category": category, "reason": "unresolved-or-ambiguous"})
                 continue
             existing = resolved.get(note_path)
-            if existing is None or entry["confidence"] > existing["confidence"]:
+            if existing is None or len(entry["evidence"]) > len(existing["evidence"]):
                 if existing is not None:
-                    skipped.append({"name": existing["name"], "category": category, "reason": "superseded-by-higher-confidence"})
+                    skipped.append({"name": existing["name"], "category": category, "reason": "superseded-by-more-evidence"})
                 resolved[note_path] = entry
             else:
-                skipped.append({"name": entry["name"], "category": category, "reason": "superseded-by-higher-confidence"})
-        ranked = sorted(resolved.items(), key=lambda item: item[1]["confidence"], reverse=True)[:max_per_day]
+                skipped.append({"name": entry["name"], "category": category, "reason": "superseded-by-more-evidence"})
+        ranked = sorted(resolved.items(), key=lambda item: len(item[1]["evidence"]), reverse=True)[:max_per_day]
         for note_path, entry in ranked:
             note_text = inject_links(entry["note"], index)
-            entry_body = render_entry(date, note_text, entry["evidence"], entry["confidence"])
+            entry_body = render_entry(date, note_text, entry["evidence"])
             target = companion_path(note_path, category)
             if dry_run:
                 written.append({"name": note_path.stem, "category": category, "path": str(target)})

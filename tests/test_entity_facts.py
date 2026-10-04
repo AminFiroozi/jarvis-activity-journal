@@ -56,11 +56,11 @@ class SummarizeProjectsTests(unittest.TestCase):
 
 
 class BuildEvidenceTests(unittest.TestCase):
-    def test_prefers_the_synthesized_narrative_json(self):
+    def test_reads_the_daily_markdown_narrative(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
-            (journal / "raw").mkdir()
-            (journal / "raw" / "journal-2026-08-23.json").write_text(json.dumps({"summary": "Worked on Mahoura with Dariush."}), encoding="utf-8")
+            (journal / "daily").mkdir()
+            (journal / "daily" / "2026-08-23.md").write_text("# Journal\n\n## LLM narrative\n\nWorked on Mahoura with Dariush.\n", encoding="utf-8")
 
             evidence = build_evidence(journal, "2026-08-23", roster={"people": ["DariushSeif"], "projects": ["Mahoura"]})
 
@@ -77,6 +77,28 @@ class BuildEvidenceTests(unittest.TestCase):
 
             self.assertIn("Worked on Mahoura.", evidence["narrative"])
 
+    def test_input_stamp_is_not_part_of_the_narrative_and_stale_raw_json_is_ignored(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "daily").mkdir()
+            (journal / "raw").mkdir()
+            (journal / "raw" / "journal-2026-08-23.json").write_text(json.dumps({"summary": "STALE"}), encoding="utf-8")
+            (journal / "daily" / "2026-08-23.md").write_text("# Journal\n\n## LLM narrative\n\nWorked on Mahoura.\n\n<!-- input: abc123 -->\n", encoding="utf-8")
+
+            evidence = build_evidence(journal, "2026-08-23", roster={"people": [], "projects": []})
+
+            self.assertEqual(evidence["narrative"], "Worked on Mahoura.")
+
+    def test_stale_raw_json_alone_gives_no_narrative(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "raw").mkdir()
+            (journal / "raw" / "journal-2026-08-23.json").write_text(json.dumps({"summary": "STALE"}), encoding="utf-8")
+
+            evidence = build_evidence(journal, "2026-08-23", roster={"people": [], "projects": []})
+
+            self.assertIsNone(evidence["narrative"])
+
     def test_narrative_is_none_when_nothing_exists(self):
         with tempfile.TemporaryDirectory() as directory:
             evidence = build_evidence(Path(directory), "2026-08-23", roster={"people": [], "projects": []})
@@ -87,7 +109,7 @@ class ExtractEntityFactsTests(unittest.TestCase):
     def test_parses_the_model_response(self):
         provider = {"name": "test"}
         evidence = {"date": "2026-08-23", "narrative": "text", "projects": [], "roster": {"people": [], "projects": []}, "events": []}
-        canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50, "confidence": 0.8}], "projects": []})
+        canned = json.dumps({"people": [{"name": "DariushSeif", "note": "x" * 50}], "projects": []})
         with mock.patch("src.analysis.entity_facts.call_chat_completions", return_value=canned) as mocked:
             result = extract_entity_facts(provider, evidence)
         self.assertEqual(result["people"][0]["name"], "DariushSeif")
@@ -97,7 +119,7 @@ class ExtractEntityFactsTests(unittest.TestCase):
 class ValidateFactsTests(unittest.TestCase):
     def test_drops_entries_with_blank_name_or_short_note(self):
         payload = {
-            "people": [{"name": "", "note": "x" * 50}, {"name": "DariushSeif", "note": "too short"}, {"name": "Mahoura", "note": "x" * 50, "confidence": 0.7}],
+            "people": [{"name": "", "note": "x" * 50}, {"name": "DariushSeif", "note": "too short"}, {"name": "Mahoura", "note": "x" * 50}],
             "projects": "not-a-list",
         }
         result = validate_facts(payload)
@@ -105,11 +127,11 @@ class ValidateFactsTests(unittest.TestCase):
         self.assertEqual(result["people"][0]["name"], "Mahoura")
         self.assertEqual(result["projects"], [])
 
-    def test_defaults_confidence_and_evidence(self):
-        payload = {"people": [{"name": "X", "note": "y" * 50}], "projects": []}
+    def test_defaults_evidence_and_has_no_confidence(self):
+        payload = {"people": [{"name": "X", "note": "y" * 50, "confidence": 0.9}], "projects": []}
         result = validate_facts(payload)
-        self.assertEqual(result["people"][0]["confidence"], 0.0)
         self.assertEqual(result["people"][0]["evidence"], [])
+        self.assertNotIn("confidence", result["people"][0])
 
 
 if __name__ == "__main__":

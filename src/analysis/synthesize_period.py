@@ -1,109 +1,35 @@
 #!/usr/bin/env python3
-"""Synthesize hourly and weekly narrative journals from local activity evidence."""
+"""Build hourly, daily and weekly reports; each level compacts the Markdown of the level below."""
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import pathlib
 import re
-from typing import Callable
 
-from src.analysis.narrative import compact_event, compact_session, event_stamp, fit_evidence, parse_model_json
-from src.analysis.sessionize import detect_sessions
+from src.analysis.narrative import parse_model_json, truncate
+from src.analysis.report_levels import LEVELS, REPORT_FORMAT_VERSION, build_prompt
+from src.analysis.report_render import (
+    daily_narrative_text,
+    read_input_stamp,
+    render_report,
+    strip_input_stamp,
+    upsert_daily_narrative,
+    with_input_stamp,
+)
 from src.infra.heartbeat import write_heartbeat
-from src.infra.processing_queue import FileJobQueue
 from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 
-
-HOURLY_PROMPT = """You are writing a factual, detailed personal activity journal entry for ONE HOUR of observed computer events.
-Return only valid JSON with this shape:
-{
-  "summary": "one or two concise factual sentences describing this hour",
-  "timeline": [{"time": "HH:MM", "activity": "what was observed"}],
-  "patterns": ["useful observed patterns within this hour"],
-  "next_actions": ["reasonable next actions grounded in evidence, if any"],
-  "confidence": 0.0
-}
-Be specific and fine-grained — this is a single hour, so capture the actual sequence of what happened, not a vague summary. Do not invent intent, accomplishments, people, conversations, or conclusions. Mark uncertain interpretations through a lower confidence value. Keep private message content summarized rather than reproduced."""
-
-WEEKLY_PROMPT = """You are writing a factual, general personal activity journal entry summarizing ONE WEEK of observed computer events.
-Return only valid JSON with this shape:
-{
-  "summary": "one concise factual paragraph covering the week as a whole",
-  "timeline": [{"time": "HH:MM", "activity": "a few of the week's most significant moments only, not an hour-by-hour recap"}],
-  "patterns": ["broad patterns observed across the week"],
-  "next_actions": ["reasonable next actions grounded in evidence, if any"],
-  "confidence": 0.0
-}
-Stay general — cover fewer, broader points rather than every detail; this is a week-level summary, not a merged hourly log. Do not invent intent, accomplishments, people, conversations, or conclusions. Mark uncertain interpretations through a lower confidence value. Keep private message content summarized rather than reproduced."""
-
-_SCREENSHOT_FILENAME_PATTERN = re.compile(r"^screen-(\d{2})-\d{2}-\d{2}-\d+\.jpg$")
-
-
-def _event_hour(event: dict) -> int | None:
-    value = event_stamp(event)
-    if not isinstance(value, str) or len(value) < 13:
-        return None
-    try:
-        return dt.datetime.fromisoformat(value.replace("Z", "+00:00")).hour
-    except ValueError:
-        return None
-
-
-def read_period_events(
-    journal_root: pathlib.Path,
-    dates: list[str],
-    hour: int | None = None,
-    compact: Callable[[dict], dict | None] = compact_event,
-    limit: int = 1000,
-) -> dict:
-    raw_events: list[dict] = []
-    compacted: list[dict] = []
-    for date in dates:
-        for filename in (f"activity-{date}.jsonl", f"content-{date}.jsonl", f"visual-{date}.jsonl"):
-            path = journal_root / "raw" / filename
-            if not path.exists():
-                continue
-            for line in path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if hour is not None and _event_hour(record) != hour:
-                    continue
-                raw_events.append(record)
-                event = compact(record)
-                if event:
-                    compacted.append(event)
-    sessions = [compact_session(session) for session in detect_sessions(raw_events)]
-    return {"sessions": sessions, "recent": compacted[-limit:]}
-
-
-def has_evidence_for_hour(journal_root: pathlib.Path, date: str, hour: int) -> bool:
-    for filename in (f"activity-{date}.jsonl", f"content-{date}.jsonl", f"visual-{date}.jsonl"):
-        path = journal_root / "raw" / filename
-        if not path.exists():
-            continue
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if _event_hour(record) == hour:
-                return True
-    screenshot_dir = journal_root / "screenshots" / date
-    if screenshot_dir.exists():
-        for path in screenshot_dir.glob("screen-*.jpg"):
-            match = _SCREENSHOT_FILENAME_PATTERN.match(path.name)
-            if match and int(match.group(1)) == hour:
-                return True
-    return False
+STAGE_KEYS = {"hourly": "hourlySynthesis", "daily": "journalSynthesis", "weekly": "weeklySynthesis"}
+# The provider allows ~8000 tokens per minute per request (input + output); 12000 chars leaves room for a long answer.
+MAX_INPUT_CHARS = {"hourly": 12000, "daily": 12000, "weekly": 12000}
+MAX_ACTIVITY_LINES = 40
+_REPEAT_PATTERN = re.compile(r"\nUnchanged since (\d{2}):(\d{2}):(\d{2})")
+_MIN_PART_CHARS = 300
+_SHORTENED = "[…shortened]"
 
 
 def week_dates(date: str) -> tuple[int, int, list[str]]:
@@ -118,60 +44,197 @@ def week_dates(date: str) -> tuple[int, int, list[str]]:
     return year, week, dates
 
 
-def render_period_document(title: str, narrative: dict) -> str:
-    summary = str(narrative.get("summary", "No narrative summary returned.")).strip()
-    lines = [f"# {title}", "", summary, ""]
-    for section_title, key in (("Timeline", "timeline"), ("Patterns", "patterns"), ("Next actions", "next_actions")):
-        values = narrative.get(key) or []
-        if not values:
+def _activity_records(journal_root: pathlib.Path, date: str):
+    path = journal_root / "raw" / f"activity-{date}.jsonl"
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
             continue
-        lines.extend([f"### {section_title}", ""])
-        for value in values:
-            if isinstance(value, dict):
-                lines.append(f"- {value.get('time', '')} — {value.get('activity', '')}".strip(" —"))
-            else:
-                lines.append(f"- {value}")
-        lines.append("")
-    lines.append(f"_LLM confidence: {narrative.get('confidence', 'unknown')}_")
-    return "\n".join(lines).rstrip() + "\n"
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        stamp = record.get("localTimestamp")
+        if record.get("source") != "foreground-window" or not record.get("process") or not isinstance(stamp, str) or len(stamp) < 16:
+            continue
+        if stamp[:10] != date or not stamp[11:13].isdigit():
+            continue
+        yield record, int(stamp[11:13]), stamp[11:16]
 
 
-def call_model(provider: dict, evidence_dict: dict, prompt: str, max_chars: int = 6000) -> dict:
-    sessions, recent, evidence = fit_evidence(evidence_dict["sessions"], evidence_dict["recent"], max_chars)
-    messages = [{"role": "system", "content": prompt}, {"role": "user", "content": f"Observed events:\n{evidence}"}]
-    content = call_chat_completions(provider, messages, temperature=0.2)
-    return parse_model_json(content)
+def activity_lines(journal_root: pathlib.Path, date: str, hour: int) -> list[str]:
+    runs: list[list[str]] = []
+    for record, record_hour, clock in _activity_records(journal_root, date):
+        if record_hour != hour:
+            continue
+        app = pathlib.Path(str(record.get("executable") or "")).stem or str(record["process"])
+        title = truncate(record.get("windowTitle") or "", 60)
+        if runs and runs[-1][2] == app and runs[-1][3] == title:
+            runs[-1][1] = clock
+        else:
+            runs.append([clock, clock, app, title])
+    lines = [
+        f"{start if start == end else f'{start}–{end}'} {app}" + (f" — {title}" if title else "")
+        for start, end, app, title in runs
+    ]
+    if len(lines) > MAX_ACTIVITY_LINES:
+        step = -(-len(lines) // MAX_ACTIVITY_LINES)
+        lines = lines[::step]
+    return lines
 
 
-def synthesize_hour(provider: dict, journal_root: pathlib.Path, date: str, hour: int) -> dict:
-    evidence = read_period_events(journal_root, [date], hour=hour)
-    narrative = call_model(provider, evidence, HOURLY_PROMPT)
-    path = journal_root / "hourly" / date / f"{hour:02d}.md"
+def _screen_dir(journal_root: pathlib.Path, date: str, hour: int) -> pathlib.Path:
+    return journal_root / "screens" / date / f"{hour:02d}"
+
+
+def hours_with_input(journal_root: pathlib.Path, date: str) -> list[int]:
+    hours: set[int] = set()
+    screens = journal_root / "screens" / date
+    if screens.exists():
+        for directory in screens.iterdir():
+            if directory.is_dir() and directory.name.isdigit() and any(directory.glob("*.md")):
+                hours.add(int(directory.name))
+    for _, record_hour, _ in _activity_records(journal_root, date):
+        hours.add(record_hour)
+    return sorted(hours)
+
+
+def _shorten(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    newline = cut.rfind("\n")
+    if newline > limit // 2:
+        cut = cut[:newline]
+    return cut.rstrip() + "\n" + _SHORTENED
+
+
+def _fit(parts: list[str], limit: int) -> list[str]:
+    if len("\n\n".join(parts)) <= limit:
+        return parts
+    overhead = len(_SHORTENED) + 3  # "\n" + marker + the "\n\n" separator between parts
+    max_parts = max(2, limit // (_MIN_PART_CHARS + overhead))
+    while len(parts) > max_parts:
+        parts = parts[::2]
+    per_part = max(_MIN_PART_CHARS, limit // len(parts) - overhead)
+    return [_shorten(part, per_part) for part in parts]
+
+
+def gather_hour(journal_root: pathlib.Path, date: str, hour: int) -> str | None:
+    directory = _screen_dir(journal_root, date, hour)
+    files = sorted(directory.glob("*.md")) if directory.exists() else []
+    activity = activity_lines(journal_root, date, hour)
+    if not files and not activity:
+        return None
+    screens: list[str] = []
+    repeats = 0
+    seen_originals: set[str] = set()
+    for file in files:
+        text = strip_input_stamp(file.read_text(encoding="utf-8")).strip()
+        match = _REPEAT_PATTERN.search(text)
+        if not match:
+            screens.append(text)
+        elif int(match.group(1)) != hour:
+            # The original is in an earlier hour, so this hour has no other evidence of the screen:
+            # keep one file per distinct original and skip further duplicates of it.
+            if match.group(0) not in seen_originals:
+                seen_originals.add(match.group(0))
+                screens.append(text)
+        else:
+            repeats += 1
+    header = f"Hour {hour:02d}:00 on {date}."
+    activity_block = "## Active windows\n\n" + "\n".join(f"- {line}" for line in activity) if activity else ""
+    budget = max(MAX_INPUT_CHARS["hourly"] - len(activity_block), 2000)
+    parts = [header, f"## Screens ({len(screens)} analysed)"] + _fit(screens, budget)
+    if repeats:
+        parts.append(f"{repeats} further screenshot(s) were unchanged repeats of the screens above.")
+    if activity_block:
+        parts.append(activity_block)
+    return "\n\n".join(parts)
+
+
+def gather_day(journal_root: pathlib.Path, date: str) -> str | None:
+    directory = journal_root / "hourly" / date
+    files = sorted(directory.glob("*.md")) if directory.exists() else []
+    parts = [strip_input_stamp(file.read_text(encoding="utf-8")).strip() for file in files]
+    parts = [part for part in parts if part]
+    if not parts:
+        return None
+    return "\n\n".join([f"Day {date}, {len(parts)} hourly report(s)."] + _fit(parts, MAX_INPUT_CHARS["daily"]))
+
+
+def gather_week(journal_root: pathlib.Path, date: str) -> str | None:
+    _, _, dates = week_dates(date)
+    parts: list[str] = []
+    for day in dates:
+        path = journal_root / "daily" / f"{day}.md"
+        if not path.exists():
+            continue
+        narrative = daily_narrative_text(path.read_text(encoding="utf-8"))
+        if narrative:
+            label = dt.date.fromisoformat(day).strftime("%a %Y-%m-%d")
+            parts.append(f"## {label}\n\n{narrative}")
+    if not parts:
+        return None
+    return "\n\n".join([f"Week up to {date}, {len(parts)} daily report(s)."] + _fit(parts, MAX_INPUT_CHARS["weekly"]))
+
+
+def call_report_model(provider: dict, level: str, source_text: str) -> dict:
+    base_messages = [
+        {"role": "system", "content": build_prompt(level)},
+        {"role": "user", "content": f"Sources:\n{source_text}"},
+    ]
+    messages = base_messages
+    last_error: Exception | None = None
+    for _ in range(2):
+        content = call_chat_completions(provider, messages, temperature=0.2)
+        try:
+            return parse_model_json(content)
+        except ValueError as error:
+            last_error = error
+            # Reuse the original request plus one short nudge; echoing the bad answer would double the input.
+            messages = base_messages + [
+                {"role": "user", "content": "Your previous answer was not valid JSON. Return only the JSON object."},
+            ]
+    raise ValueError(f"model returned invalid JSON twice: {last_error}")
+
+
+def build_report(provider: dict, journal_root: pathlib.Path, level: str, date: str, hour: int | None = None) -> dict:
+    if level == "hourly":
+        source = gather_hour(journal_root, date, hour)
+        path = journal_root / "hourly" / date / f"{hour:02d}.md"
+        title = f"Hourly journal — {date} {hour:02d}:00"
+    elif level == "daily":
+        source = gather_day(journal_root, date)
+        path = journal_root / "daily" / f"{date}.md"
+        title = f"Automatic Activity Journal — {date}"
+    else:
+        source = gather_week(journal_root, date)
+        year, week, _ = week_dates(date)
+        path = journal_root / "weekly" / f"{year}-W{week:02d}.md"
+        title = f"Weekly journal — {year}-W{week:02d}"
+    if source is None:
+        return {"status": "no-input"}
+    digest = hashlib.sha1((REPORT_FORMAT_VERSION + "\n" + source).encode("utf-8")).hexdigest()[:12]
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if read_input_stamp(existing) == digest:
+        return {"status": "unchanged", "path": str(path)}
+    narrative = call_report_model(provider, level, source)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_period_document(f"Hourly journal — {date} {hour:02d}:00", narrative), encoding="utf-8")
-    return {"path": str(path)}
-
-
-def synthesize_week(provider: dict, journal_root: pathlib.Path, date: str) -> dict:
-    year, week, dates = week_dates(date)
-    evidence = read_period_events(journal_root, dates)
-    narrative = call_model(provider, evidence, WEEKLY_PROMPT)
-    path = journal_root / "weekly" / f"{year}-W{week:02d}.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(render_period_document(f"Weekly journal — {year}-W{week:02d}", narrative), encoding="utf-8")
-    return {"path": str(path), "year": year, "week": week}
-
-
-def _job_in_flight(queue: FileJobQueue, job_id: str) -> bool:
-    existing = queue.find(job_id)
-    return existing is not None and existing[0] in ("pending", "processing")
+    if level == "daily":
+        text = upsert_daily_narrative(existing or f"# {title}\n", narrative)
+    else:
+        text = render_report(title, narrative)
+    path.write_text(with_input_stamp(text, digest), encoding="utf-8")
+    return {"status": "complete", "path": str(path)}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--journal-root", required=True, type=pathlib.Path)
     parser.add_argument("--config", required=True, type=pathlib.Path)
-    parser.add_argument("--period", required=True, choices=("hourly", "weekly"))
+    parser.add_argument("--period", required=True, choices=LEVELS)
     parser.add_argument("--date", default=dt.date.today().isoformat())
     return parser.parse_args()
 
@@ -179,81 +242,42 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     journal = args.journal_root
+    level = args.period
+    heartbeat_name = f"{level}-synthesis"
     try:
         config = json.loads(args.config.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        print(f"{args.period} synthesis failed: {error}")
+        print(f"{level} synthesis failed: {error}")
+        return 1
+    stage_key = STAGE_KEYS[level]
+    if not (config.get(stage_key) or {}).get("enabled", True):
+        print(json.dumps({"period": level, "status": "disabled"}))
         return 0
-    stage_key = "hourlySynthesis" if args.period == "hourly" else "weeklySynthesis"
-    stage_config = config.get(stage_key) or {}
-    heartbeat_name = f"{args.period}-synthesis"
-
-    if not stage_config.get("enabled", True):
-        print(json.dumps({"period": args.period, "status": "disabled"}))
-        return 0
-
     try:
         provider = resolve_provider(config, stage_key)
     except (ProviderError, KeyError) as error:
         write_heartbeat(journal, heartbeat_name, "failed", error_message=str(error))
-        print(f"{args.period} synthesis failed: {error}")
-        return 0
+        print(f"{level} synthesis failed: {error}")
+        return 1
 
-    max_attempts = int(stage_config.get("maxAttempts", 5))
-    retry_delay_seconds = int(stage_config.get("retryDelaySeconds", 60))
-    queue = FileJobQueue(journal / "queue-period")
-
+    hours: list[int | None] = hours_with_input(journal, args.date) if level == "hourly" else [None]
     results: list[dict] = []
-    attempted: set[str] = set()
-    while True:
-        job = queue.claim(kind=args.period, exclude_ids=attempted)
-        if job is None:
-            break
-        attempted.add(job["id"])
-        payload = job["payload"]
+    for hour in hours:
         try:
-            if args.period == "hourly":
-                result = synthesize_hour(provider, journal, payload["date"], payload["hour"])
-            else:
-                result = synthesize_week(provider, journal, payload["date"])
-            queue.complete(job["id"], result)
-            results.append({"status": "complete", **result})
-        except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
-            outcome = queue.fail(job["id"], str(error), max_attempts=max_attempts, retry_delay_seconds=retry_delay_seconds)
-            results.append({"status": outcome["status"], "error": str(error)})
+            result = build_report(provider, journal, level, args.date, hour=hour)
+        except (OSError, ValueError, KeyError, IndexError, TypeError, ProviderError) as error:
+            result = {"status": "failed", "error": str(error)}
+        if hour is not None:
+            result["hour"] = hour
+        results.append(result)
 
-    if args.period == "hourly":
-        now = dt.datetime.now()
-        hour = now.hour
-        job_id = f"hourly-{args.date}-{hour:02d}"
-        if not _job_in_flight(queue, job_id):
-            if not has_evidence_for_hour(journal, args.date, hour):
-                results.append({"status": "no-evidence", "date": args.date, "hour": hour})
-            else:
-                try:
-                    result = synthesize_hour(provider, journal, args.date, hour)
-                    results.append({"status": "complete", **result})
-                except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
-                    queue.enqueue("hourly", {"date": args.date, "hour": hour}, job_id=job_id)
-                    results.append({"status": "failed", "error": str(error)})
-    else:
-        year, week, _ = week_dates(args.date)
-        job_id = f"weekly-{year}-W{week:02d}-{args.date}"
-        if not _job_in_flight(queue, job_id):
-            try:
-                result = synthesize_week(provider, journal, args.date)
-                results.append({"status": "complete", **result})
-            except (OSError, ValueError, KeyError, json.JSONDecodeError, ProviderError) as error:
-                queue.enqueue("weekly", {"date": args.date}, job_id=job_id)
-                results.append({"status": "failed", "error": str(error)})
-
-    print(json.dumps({"period": args.period, "results": results}, ensure_ascii=False))
+    print(json.dumps({"period": level, "results": results}, ensure_ascii=False))
     failed = [item for item in results if item["status"] == "failed"]
     completed = [item for item in results if item["status"] == "complete"]
     if failed:
         write_heartbeat(journal, heartbeat_name, "failed", items_processed=len(completed), error_message=failed[-1]["error"])
-    else:
-        write_heartbeat(journal, heartbeat_name, "success", items_processed=len(completed))
+        return 1
+    write_heartbeat(journal, heartbeat_name, "success", items_processed=len(completed))
     return 0
 
 

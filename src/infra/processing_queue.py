@@ -7,7 +7,7 @@ import json
 import os
 from pathlib import Path
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 
 def _now() -> dt.datetime:
@@ -111,3 +111,32 @@ class FileJobQueue:
         self._path("processing", job_id).unlink()
         self._write("pending", job)
         return job
+
+    def requeue_failed(self, kind: str | None = None, should_requeue: Callable[[dict[str, Any]], bool] | None = None) -> int:
+        moved = 0
+        for path in sorted((self.root / "failed").glob("*.json")):
+            job = json.loads(path.read_text(encoding="utf-8"))
+            if kind is not None and job.get("kind") != kind:
+                continue
+            if should_requeue is not None and not should_requeue(job):
+                continue
+            job.update({"status": "pending", "attempts": 0, "availableAt": _timestamp(_now())})
+            job.pop("failedAt", None)
+            path.unlink()
+            self._write("pending", job)
+            moved += 1
+        return moved
+
+    def dead_letter_pending(self, should_dead_letter: Callable[[dict[str, Any]], bool], reason: str, kind: str | None = None) -> int:
+        moved = 0
+        for path in sorted((self.root / "pending").glob("*.json")):
+            job = json.loads(path.read_text(encoding="utf-8"))
+            if kind is not None and job.get("kind") != kind:
+                continue
+            if not should_dead_letter(job):
+                continue
+            job.update({"status": "failed", "lastError": reason, "failedAt": _timestamp(_now())})
+            path.unlink()
+            self._write("failed", job)
+            moved += 1
+        return moved

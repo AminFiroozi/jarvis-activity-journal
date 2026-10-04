@@ -44,7 +44,7 @@ class RunHourlyWiringTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(len(self._calls_containing(mock_run, "src.analysis.build_journals")), 0)
 
-    def test_synthesize_period_is_invoked_for_both_hourly_and_weekly(self):
+    def test_periods_run_in_chain_order_hourly_daily_weekly(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             journal_root = root / "journal"
@@ -56,9 +56,9 @@ class RunHourlyWiringTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             period_calls = self._calls_containing(mock_run, "src.analysis.synthesize_period")
-            self.assertEqual(len(period_calls), 2)
-            periods = {call.args[0][call.args[0].index("--period") + 1] for call in period_calls}
-            self.assertEqual(periods, {"hourly", "weekly"})
+            periods = [call.args[0][call.args[0].index("--period") + 1] for call in period_calls]
+            self.assertEqual(periods, ["hourly", "daily", "weekly"])
+            self.assertEqual(len(self._calls_containing(mock_run, "src.analysis.synthesize_journal")), 0)
 
 
 if __name__ == "__main__":

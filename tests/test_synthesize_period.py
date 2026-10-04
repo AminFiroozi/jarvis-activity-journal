@@ -1,4 +1,3 @@
-import datetime as dt
 import json
 import sys
 import tempfile
@@ -6,103 +5,49 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from src.analysis.report_render import NARRATIVE_MARKER, read_input_stamp
 from src.analysis.synthesize_period import (
-    HOURLY_PROMPT,
-    WEEKLY_PROMPT,
-    call_model,
-    has_evidence_for_hour,
+    MAX_INPUT_CHARS,
+    STAGE_KEYS,
+    activity_lines,
+    _fit,
+    _shorten,
+    build_report,
+    call_report_model,
+    gather_day,
+    gather_hour,
+    gather_week,
+    hours_with_input,
     main,
-    read_period_events,
-    render_period_document,
-    synthesize_hour,
-    synthesize_week,
     week_dates,
 )
 
-
-class ReadPeriodEventsTests(unittest.TestCase):
-    def test_single_date_no_hour_filter_matches_narrative_shape(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal = Path(directory)
-            raw = journal / "raw"
-            raw.mkdir()
-            events = [
-                {"source": "foreground-window", "process": "Code", "timestamp": f"2026-08-23T{hour:02d}:00:00+00:00", "active": True}
-                for hour in range(9, 18)
-            ]
-            (raw / "activity-2026-08-23.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
-
-            result = read_period_events(journal, ["2026-08-23"])
-
-            self.assertIn("sessions", result)
-            self.assertIn("recent", result)
-            self.assertEqual(len(result["recent"]), 9)
-
-    def test_hour_filter_excludes_events_outside_the_hour(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal = Path(directory)
-            raw = journal / "raw"
-            raw.mkdir()
-            events = [
-                {"source": "foreground-window", "process": "Code", "localTimestamp": "2026-08-23T09:15:00+03:30", "active": True},
-                {"source": "foreground-window", "process": "Code", "localTimestamp": "2026-08-23T09:45:00+03:30", "active": True},
-                {"source": "foreground-window", "process": "Chrome", "localTimestamp": "2026-08-23T10:05:00+03:30", "active": True},
-            ]
-            (raw / "activity-2026-08-23.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
-
-            result = read_period_events(journal, ["2026-08-23"], hour=9)
-
-            self.assertEqual(len(result["recent"]), 2)
-            self.assertTrue(all(item["app"] == "Code" for item in result["recent"]))
-
-    def test_multi_date_span_merges_events_across_days(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal = Path(directory)
-            raw = journal / "raw"
-            raw.mkdir()
-            (raw / "activity-2026-08-23.jsonl").write_text(
-                json.dumps({"source": "foreground-window", "process": "Code", "localTimestamp": "2026-08-23T09:00:00+03:30", "active": True}) + "\n",
-                encoding="utf-8",
-            )
-            (raw / "activity-2026-08-24.jsonl").write_text(
-                json.dumps({"source": "foreground-window", "process": "Chrome", "localTimestamp": "2026-08-24T10:00:00+03:30", "active": True}) + "\n",
-                encoding="utf-8",
-            )
-
-            result = read_period_events(journal, ["2026-08-23", "2026-08-24"])
-
-            self.assertEqual(len(result["recent"]), 2)
-            self.assertEqual(result["recent"][0]["app"], "Code")
-            self.assertEqual(result["recent"][1]["app"], "Chrome")
+DATE = "2026-09-26"
+CANNED = json.dumps({
+    "summary": "Worked on dashboards.",
+    "on_screen": ["Kibana dashboard kassa-log"],
+    "timeline": [{"time": "10:21", "activity": "Opened Kibana"}],
+    "patterns": ["Log review"],
+    "next_actions": ["Check errors"],
+})
+PROVIDER = {"name": "test"}
 
 
-class HasEvidenceForHourTests(unittest.TestCase):
-    def test_false_when_nothing_exists_for_the_hour(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal = Path(directory)
-            self.assertFalse(has_evidence_for_hour(journal, "2026-08-23", 9))
+def _screen(journal: Path, date: str, hour: int, clock: str, body: str = "Viewing Kibana.") -> Path:
+    path = journal / "screens" / date / f"{hour:02d}" / f"{clock}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"# Screen — {date} {clock[:8].replace('-', ':')}\n\n{body}\n", encoding="utf-8")
+    return path
 
-    def test_true_when_a_jsonl_event_exists_for_the_hour(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal = Path(directory)
-            raw = journal / "raw"
-            raw.mkdir()
-            (raw / "activity-2026-08-23.jsonl").write_text(
-                json.dumps({"source": "foreground-window", "process": "Code", "localTimestamp": "2026-08-23T09:15:00+03:30", "active": True}) + "\n",
-                encoding="utf-8",
-            )
-            self.assertTrue(has_evidence_for_hour(journal, "2026-08-23", 9))
-            self.assertFalse(has_evidence_for_hour(journal, "2026-08-23", 10))
 
-    def test_true_when_only_a_screenshot_exists_for_the_hour(self):
-        with tempfile.TemporaryDirectory() as directory:
-            journal = Path(directory)
-            screenshots = journal / "screenshots" / "2026-08-23"
-            screenshots.mkdir(parents=True)
-            (screenshots / "screen-09-05-16-374.jpg").write_bytes(b"")
+def _activity(journal: Path, date: str, events: list[dict]) -> None:
+    raw = journal / "raw"
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / f"activity-{date}.jsonl").write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
 
-            self.assertTrue(has_evidence_for_hour(journal, "2026-08-23", 9))
-            self.assertFalse(has_evidence_for_hour(journal, "2026-08-23", 14))
+
+def _window(stamp: str, process: str | None, title: str | None = None, executable: str | None = None) -> dict:
+    return {"source": "foreground-window", "localTimestamp": f"{stamp}+03:30", "process": process, "executable": executable, "windowTitle": title}
 
 
 class WeekDatesTests(unittest.TestCase):
@@ -112,364 +57,413 @@ class WeekDatesTests(unittest.TestCase):
         self.assertEqual((year, week), (2026, 35))
 
 
-class RenderPeriodDocumentTests(unittest.TestCase):
-    def test_produces_daily_matching_sections(self):
-        narrative = {
-            "summary": "Worked on the journal pipeline.",
-            "timeline": [{"time": "09:15", "activity": "Started coding"}],
-            "patterns": ["Steady focus on one file"],
-            "next_actions": ["Write tests"],
-            "confidence": 0.8,
-        }
-        result = render_period_document("Hourly journal — 2026-08-23 09:00", narrative)
-
-        self.assertTrue(result.startswith("# Hourly journal — 2026-08-23 09:00\n\nWorked on the journal pipeline.\n"))
-        self.assertIn("### Timeline", result)
-        self.assertIn("- 09:15 — Started coding", result)
-        self.assertIn("### Patterns", result)
-        self.assertIn("### Next actions", result)
-        self.assertIn("_LLM confidence: 0.8_", result)
-        self.assertNotIn("### Accomplishments", result)
-        self.assertNotIn("### Blockers", result)
-
-    def test_omits_empty_sections(self):
-        narrative = {"summary": "Quiet hour.", "confidence": 0.5}
-        result = render_period_document("Hourly journal — 2026-08-23 03:00", narrative)
-
-        self.assertNotIn("### Timeline", result)
-        self.assertNotIn("### Patterns", result)
-        self.assertNotIn("### Next actions", result)
-
-
-class CallModelTests(unittest.TestCase):
-    def test_uses_the_given_prompt_and_parses_the_response(self):
-        from unittest import mock
-
-        provider = {"name": "test"}
-        evidence_dict = {"sessions": [], "recent": []}
-        canned = '{"summary": "ok", "confidence": 0.9}'
-        with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=canned) as mocked:
-            result = call_model(provider, evidence_dict, HOURLY_PROMPT)
-
-        self.assertEqual(result["summary"], "ok")
-        mocked.assert_called_once()
-        messages = mocked.call_args.args[1]
-        self.assertEqual(messages[0]["content"], HOURLY_PROMPT)
-
-    def test_weekly_prompt_is_distinct_from_hourly(self):
-        self.assertNotEqual(HOURLY_PROMPT, WEEKLY_PROMPT)
-
-
-class SynthesizeHourTests(unittest.TestCase):
-    def test_writes_the_rendered_document(self):
+class ActivityLinesTests(unittest.TestCase):
+    def test_collapses_consecutive_identical_windows_and_ignores_other_hours(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
-            raw = journal / "raw"
-            raw.mkdir()
-            (raw / "activity-2026-08-23.jsonl").write_text(
-                json.dumps({"source": "foreground-window", "process": "Code", "localTimestamp": "2026-08-23T09:15:00+03:30", "active": True}) + "\n",
-                encoding="utf-8",
-            )
-            canned = json.dumps({"summary": "Coded for an hour.", "confidence": 0.7})
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=canned):
-                result = synthesize_hour({"name": "test"}, journal, "2026-08-23", 9)
+            _activity(journal, DATE, [
+                _window("2026-09-26T10:00:10", "remmina", "311", "/usr/bin/remmina"),
+                _window("2026-09-26T10:01:10", "remmina", "311", "/usr/bin/remmina"),
+                _window("2026-09-26T10:02:10", "chrome", "Kibana", "/opt/google/chrome/chrome"),
+                _window("2026-09-26T11:00:10", "code", "main.py"),
+            ])
 
-            path = journal / "hourly" / "2026-08-23" / "09.md"
-            self.assertEqual(result["path"], str(path))
-            self.assertIn("Coded for an hour.", path.read_text(encoding="utf-8"))
+            lines = activity_lines(journal, DATE, 10)
 
-    def test_raises_when_the_model_call_fails(self):
+            self.assertEqual(lines, ["10:00–10:01 remmina — 311", "10:02 chrome — Kibana"])
+
+    def test_events_without_a_process_are_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
-                with self.assertRaises(json.JSONDecodeError):
-                    synthesize_hour({"name": "test"}, journal, "2026-08-23", 9)
+            _activity(journal, DATE, [_window("2026-09-26T18:13:00", None)])
+
+            self.assertEqual(activity_lines(journal, DATE, 18), [])
 
 
-class SynthesizeWeekTests(unittest.TestCase):
-    def test_writes_the_rendered_document(self):
+class HoursWithInputTests(unittest.TestCase):
+    def test_union_of_screen_hours_and_activity_hours(self):
         with tempfile.TemporaryDirectory() as directory:
             journal = Path(directory)
-            canned = json.dumps({"summary": "Steady week.", "confidence": 0.6})
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=canned):
-                result = synthesize_week({"name": "test"}, journal, "2026-08-27")
+            _screen(journal, DATE, 9, "09-05-16-374")
+            _activity(journal, DATE, [_window("2026-09-26T14:00:10", "code", "x"), _window("2026-09-26T15:00:10", None)])
 
-            year, week, _ = week_dates("2026-08-27")
-            path = journal / "weekly" / f"{year}-W{week:02d}.md"
-            self.assertEqual(result["path"], str(path))
-            self.assertIn("Steady week.", path.read_text(encoding="utf-8"))
+            self.assertEqual(hours_with_input(journal, DATE), [9, 14])
+
+
+class GatherTests(unittest.TestCase):
+    def test_hour_with_nothing_returns_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(gather_hour(Path(directory), DATE, 10))
+
+    def test_hour_with_only_no_active_window_events_returns_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _activity(journal, DATE, [_window("2026-09-26T18:13:00", None)])
+
+            self.assertIsNone(gather_hour(journal, DATE, 18))
+
+    def test_hour_includes_screens_and_activity_and_counts_repeats_without_including_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 10, "10-21-15-521", "Viewing Kibana.")
+            _screen(journal, DATE, 10, "10-22-15-521", "Viewing Kibana.\n\nUnchanged since 10:21:15.")
+            _activity(journal, DATE, [_window("2026-09-26T10:21:00", "chrome", "Kibana")])
+
+            text = gather_hour(journal, DATE, 10)
+
+            self.assertIn("10:21:15", text)
+            self.assertNotIn("10:22:15", text)
+            self.assertIn("1 further screenshot(s) were unchanged repeats", text)
+            self.assertIn("chrome — Kibana", text)
+
+    def test_screen_unchanged_since_an_earlier_hour_is_kept_once_per_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 14, "14-00-10-000", "Viewing Kibana.\n\nUnchanged since 13:50:00.")
+            _screen(journal, DATE, 14, "14-01-10-000", "Viewing Kibana.\n\nUnchanged since 13:50:00.")
+            _screen(journal, DATE, 14, "14-03-10-000", "Viewing Kibana.\n\nUnchanged since 14:02:00.")
+
+            text = gather_hour(journal, DATE, 14)
+
+            self.assertEqual(text.count("Unchanged since 13:50:00"), 1)
+            self.assertIn("(1 analysed)", text)
+            self.assertIn("1 further screenshot(s) were unchanged repeats", text)
+
+    def test_hour_source_text_ignores_the_stamp_comment_in_screen_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            path = _screen(journal, DATE, 10, "10-21-15-521")
+            path.write_text(path.read_text(encoding="utf-8") + "\n<!-- input: abc123 -->\n", encoding="utf-8")
+
+            self.assertNotIn("<!--", gather_hour(journal, DATE, 10))
+
+    def test_day_reads_only_hourly_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "hourly" / DATE).mkdir(parents=True)
+            (journal / "hourly" / DATE / "10.md").write_text("# Hourly journal — 2026-09-26 10:00\n\nKibana hour.\n", encoding="utf-8")
+            (journal / "hourly" / DATE / "11.md").write_text("# Hourly journal — 2026-09-26 11:00\n\nCoding hour.\n", encoding="utf-8")
+            _screen(journal, DATE, 12, "12-00-00-000", "should not appear")
+
+            text = gather_day(journal, DATE)
+
+            self.assertLess(text.index("Kibana hour."), text.index("Coding hour."))
+            self.assertNotIn("should not appear", text)
+            self.assertIsNone(gather_day(journal, "2026-01-01"))
+
+    def test_week_reads_daily_narratives_and_skips_days_without_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "daily").mkdir()
+            (journal / "daily" / "2026-09-21.md").write_text(f"# D\n\n## Applications\n\nscaffold-only\n\n{NARRATIVE_MARKER}\n\nMonday summary.\n", encoding="utf-8")
+            (journal / "daily" / "2026-09-22.md").write_text("# D\n\n## Applications\n\nno narrative yet\n", encoding="utf-8")
+
+            text = gather_week(journal, "2026-09-23")
+
+            self.assertIn("Monday summary.", text)
+            self.assertIn("2026-09-21", text)
+            self.assertNotIn("scaffold-only", text)
+            self.assertNotIn("no narrative yet", text)
+
+    def test_week_with_no_narratives_returns_none(self):
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(gather_week(Path(directory), "2026-09-23"))
+
+
+class CallReportModelTests(unittest.TestCase):
+    def test_retries_once_on_invalid_json_then_succeeds(self):
+        with mock.patch("src.analysis.synthesize_period.call_chat_completions", side_effect=['{"summary": "x",', CANNED]) as mocked:
+            result = call_report_model(PROVIDER, "hourly", "sources")
+
+        self.assertEqual(result["summary"], "Worked on dashboards.")
+        self.assertEqual(mocked.call_count, 2)
+        retry_messages = mocked.call_args.args[1]
+        self.assertEqual(retry_messages[-1]["role"], "user")
+        self.assertIn("not valid JSON", retry_messages[-1]["content"])
+        self.assertNotIn("assistant", [m["role"] for m in retry_messages])
+        self.assertEqual(len(retry_messages), 3)
+
+    def test_two_invalid_responses_raise_value_error(self):
+        with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="nope"):
+            with self.assertRaises(ValueError):
+                call_report_model(PROVIDER, "hourly", "sources")
+
+    def test_system_prompt_is_the_level_prompt(self):
+        from src.analysis.report_levels import build_prompt
+
+        with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED) as mocked:
+            call_report_model(PROVIDER, "weekly", "sources")
+
+        self.assertEqual(mocked.call_args.args[1][0]["content"], build_prompt("weekly"))
+
+
+class BuildReportTests(unittest.TestCase):
+    def test_hourly_report_is_written_with_shared_format_and_stamp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 10, "10-21-15-521")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED):
+                result = build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+
+            path = journal / "hourly" / DATE / "10.md"
+            self.assertEqual(result, {"status": "complete", "path": str(path)})
+            text = path.read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# Hourly journal — 2026-09-26 10:00\n\nWorked on dashboards.\n"))
+            self.assertNotIn("### On screen", text)
+            self.assertIsNotNone(read_input_stamp(text))
+            self.assertNotIn("confidence", text.lower())
+            self.assertNotIn("Next actions", text)
+
+    def test_unchanged_input_skips_the_model_and_changed_input_rebuilds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 10, "10-21-15-521")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED) as mocked:
+                build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+                second = build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+                self.assertEqual(second["status"], "unchanged")
+                self.assertEqual(mocked.call_count, 1)
+
+                _screen(journal, DATE, 10, "10-30-00-000", "A new screen.")
+                third = build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+                self.assertEqual(third["status"], "complete")
+                self.assertEqual(mocked.call_count, 2)
+
+    def test_changing_the_report_format_version_rebuilds_an_unchanged_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 10, "10-21-15-521")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED) as mocked:
+                build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+                with mock.patch("src.analysis.synthesize_period.REPORT_FORMAT_VERSION", "next"):
+                    result = build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(mocked.call_count, 2)
+
+    def test_no_input_writes_nothing_and_never_calls_the_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
+                result = build_report(PROVIDER, journal, "hourly", DATE, hour=3)
+
+            mocked.assert_not_called()
+            self.assertEqual(result, {"status": "no-input"})
+            self.assertFalse((journal / "hourly").exists())
+
+    def test_failed_model_call_leaves_no_file_so_the_next_run_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            _screen(journal, DATE, 10, "10-21-15-521")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="nope"):
+                with self.assertRaises(ValueError):
+                    build_report(PROVIDER, journal, "hourly", DATE, hour=10)
+
+            self.assertFalse((journal / "hourly" / DATE / "10.md").exists())
+
+    def test_daily_report_keeps_the_scaffold_and_adds_the_narrative_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "hourly" / DATE).mkdir(parents=True)
+            (journal / "hourly" / DATE / "10.md").write_text("# Hourly journal — 2026-09-26 10:00\n\nKibana hour.\n", encoding="utf-8")
+            (journal / "daily").mkdir()
+            (journal / "daily" / f"{DATE}.md").write_text("# Automatic Activity Journal — 2026-09-26\n\n## Applications\n\n- Code\n", encoding="utf-8")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED):
+                result = build_report(PROVIDER, journal, "daily", DATE)
+
+            text = (journal / "daily" / f"{DATE}.md").read_text(encoding="utf-8")
+            self.assertEqual(result["status"], "complete")
+            self.assertIn("## Applications", text)
+            self.assertIn(NARRATIVE_MARKER, text)
+            self.assertNotIn("### On screen", text)
+            self.assertIsNotNone(read_input_stamp(text))
+
+    def test_daily_rewritten_by_the_scaffold_is_rebuilt_even_if_input_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "hourly" / DATE).mkdir(parents=True)
+            (journal / "hourly" / DATE / "10.md").write_text("# Hourly\n\nKibana hour.\n", encoding="utf-8")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED) as mocked:
+                build_report(PROVIDER, journal, "daily", DATE)
+                (journal / "daily" / f"{DATE}.md").write_text("# Automatic Activity Journal — 2026-09-26\n", encoding="utf-8")
+                result = build_report(PROVIDER, journal, "daily", DATE)
+
+            self.assertEqual(result["status"], "complete")
+            self.assertEqual(mocked.call_count, 2)
+
+    def test_weekly_report_path_uses_iso_week(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory)
+            (journal / "daily").mkdir()
+            (journal / "daily" / "2026-09-21.md").write_text(f"# D\n\n{NARRATIVE_MARKER}\n\nMonday summary.\n", encoding="utf-8")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED):
+                result = build_report(PROVIDER, journal, "weekly", "2026-09-23")
+
+            self.assertEqual(result["path"], str(journal / "weekly" / "2026-W39.md"))
+            self.assertTrue(result["path"].endswith("2026-W39.md"))
+            self.assertTrue(Path(result["path"]).read_text(encoding="utf-8").startswith("# Weekly journal — 2026-W39\n"))
+
+
+def _config(journal: Path, stage: str = "hourlySynthesis", **stage_overrides) -> Path:
+    config_path = journal.parent / "settings.json"
+    config_path.write_text(json.dumps({
+        stage: {"enabled": True, "activeProvider": "test-provider", **stage_overrides},
+        "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}},
+    }), encoding="utf-8")
+    return config_path
+
+
+def _run_main(journal: Path, config_path: Path, period: str, date: str = DATE) -> int:
+    old_argv = sys.argv
+    sys.argv = ["synthesize_period", "--journal-root", str(journal), "--config", str(config_path), "--period", period, "--date", date]
+    try:
+        return main()
+    finally:
+        sys.argv = old_argv
+
+
+class FitTests(unittest.TestCase):
+    def test_input_within_the_limit_is_returned_unchanged(self):
+        parts = ["a" * 100, "b" * 100]
+        self.assertEqual(_fit(parts, 1000), parts)
+
+    def test_long_parts_are_shortened_at_a_line_boundary_and_all_are_kept(self):
+        line = "x" * 99 + "\n"
+        parts = [line * 40, line * 40, line * 40]
+
+        fitted = _fit(parts, 3000)
+
+        self.assertEqual(len(fitted), 3)
+        for part in fitted:
+            self.assertLess(len(part), len(parts[0]))
+            self.assertTrue(part.endswith("[…shortened]"))
+        self.assertLessEqual(len("\n\n".join(fitted)), 3000)
+
+    def test_many_parts_are_thinned_when_shortening_alone_is_not_enough(self):
+        parts = [f"part {i}\n" + "y" * 800 for i in range(30)]
+
+        fitted = _fit(parts, 3000)
+
+        self.assertLess(len(fitted), 30)
+        self.assertGreaterEqual(len(fitted), 2)
+        self.assertLessEqual(len("\n\n".join(fitted)), 3000)
+        self.assertEqual(fitted[0].splitlines()[0], "part 0")
+
+    def test_a_full_day_of_hourly_reports_keeps_every_hour_within_the_limit(self):
+        for count in (8, 12, 16, 20, 24):
+            parts = [f"Hour {i}\n" + ("word " * 400) for i in range(count)]
+            fitted = _fit(parts, 12000)
+            self.assertEqual(len(fitted), count, count)
+            self.assertLessEqual(len("\n\n".join(fitted)), 12000, count)
+
+    def test_parts_without_line_breaks_still_fit_and_keep_every_hour(self):
+        parts = ["z" * 3000 for _ in range(24)]
+        fitted = _fit(parts, 12000)
+        self.assertEqual(len(fitted), 24)
+        self.assertLessEqual(len("\n\n".join(fitted)), 12000)
+
+    def test_sixty_screens_are_thinned_once_and_fit(self):
+        parts = [f"Screen {i}\n" + ("detail " * 200) for i in range(60)]
+        fitted = _fit(parts, 12000)
+        self.assertGreaterEqual(len(fitted), 30)
+        self.assertLessEqual(len("\n\n".join(fitted)), 12000)
+
+    def test_shorten_leaves_short_text_alone(self):
+        self.assertEqual(_shorten("short", 100), "short")
+
+    def test_every_level_input_cap_fits_the_provider_token_limit(self):
+        self.assertEqual(MAX_INPUT_CHARS, {"hourly": 12000, "daily": 12000, "weekly": 12000})
 
 
 class MainTests(unittest.TestCase):
-    def _run(self, journal_root: Path, config_path: Path, period: str, date: str) -> int:
-        old_argv = sys.argv
-        sys.argv = [
-            "synthesize_period",
-            "--journal-root", str(journal_root),
-            "--config", str(config_path),
-            "--period", period,
-            "--date", date,
-        ]
-        try:
-            return main()
-        finally:
-            sys.argv = old_argv
+    def test_stage_keys(self):
+        self.assertEqual(STAGE_KEYS, {"hourly": "hourlySynthesis", "daily": "journalSynthesis", "weekly": "weeklySynthesis"})
 
-    def _config(self, directory: Path, period: str) -> Path:
-        stage_key = "hourlySynthesis" if period == "hourly" else "weeklySynthesis"
-        config_path = directory / "settings.json"
-        config_path.write_text(json.dumps({
-            stage_key: {"enabled": True, "activeProvider": "test-provider", "maxAttempts": 5, "retryDelaySeconds": 60},
-            "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}},
-        }), encoding="utf-8")
-        return config_path
-
-    def test_zero_evidence_hour_writes_nothing_and_never_calls_the_model(self):
+    def test_hourly_builds_every_hour_with_input_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             journal = root / "journal"
             journal.mkdir()
-            config_path = self._config(root, "hourly")
-            fixed_now = dt.datetime(2026, 8, 23, 9, 30, 0)
-            with mock.patch("src.analysis.synthesize_period.dt") as mocked_dt:
-                mocked_dt.datetime.now.return_value = fixed_now
-                mocked_dt.date.today.return_value = fixed_now.date()
-                mocked_dt.date.fromisoformat = dt.date.fromisoformat
-                mocked_dt.datetime.fromisoformat = dt.datetime.fromisoformat
-                mocked_dt.timedelta = dt.timedelta
-                with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
-                    exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
+            _screen(journal, DATE, 9, "09-05-16-374")
+            _screen(journal, DATE, 14, "14-10-00-000")
+            config_path = _config(journal)
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED) as mocked:
+                first = _run_main(journal, config_path, "hourly")
+                second = _run_main(journal, config_path, "hourly")
 
-            self.assertEqual(exit_code, 0)
-            mocked.assert_not_called()
-            self.assertFalse((journal / "hourly").exists())
-
-    def test_hour_with_a_pending_screenshot_calls_the_model(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            screenshots = journal / "screenshots" / "2026-08-23"
-            screenshots.mkdir(parents=True)
-            (screenshots / "screen-09-05-16-374.jpg").write_bytes(b"")
-            config_path = self._config(root, "hourly")
-            fixed_now = dt.datetime(2026, 8, 23, 9, 30, 0)
-            canned = json.dumps({"summary": "Screenshot-only hour.", "confidence": 0.4})
-            with mock.patch("src.analysis.synthesize_period.dt") as mocked_dt:
-                mocked_dt.datetime.now.return_value = fixed_now
-                mocked_dt.date.today.return_value = fixed_now.date()
-                mocked_dt.date.fromisoformat = dt.date.fromisoformat
-                mocked_dt.datetime.fromisoformat = dt.datetime.fromisoformat
-                mocked_dt.timedelta = dt.timedelta
-                with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=canned):
-                    exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
-
-            self.assertEqual(exit_code, 0)
-            self.assertTrue((journal / "hourly" / "2026-08-23" / "09.md").exists())
-
-    def test_failed_hour_is_queued_and_main_still_exits_zero(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            raw = journal / "raw"
-            raw.mkdir(parents=True)
-            (raw / "activity-2026-08-23.jsonl").write_text(
-                json.dumps({"source": "foreground-window", "process": "Code", "localTimestamp": "2026-08-23T09:15:00+03:30", "active": True}) + "\n",
-                encoding="utf-8",
-            )
-            config_path = self._config(root, "hourly")
-            fixed_now = dt.datetime(2026, 8, 23, 9, 30, 0)
-            with mock.patch("src.analysis.synthesize_period.dt") as mocked_dt:
-                mocked_dt.datetime.now.return_value = fixed_now
-                mocked_dt.date.today.return_value = fixed_now.date()
-                mocked_dt.date.fromisoformat = dt.date.fromisoformat
-                mocked_dt.datetime.fromisoformat = dt.datetime.fromisoformat
-                mocked_dt.timedelta = dt.timedelta
-                with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
-                    exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
-
-            self.assertEqual(exit_code, 0)
-            queued = list((journal / "queue-period" / "pending").glob("*.json"))
-            self.assertEqual(len(queued), 1)
-            self.assertFalse((journal / "hourly" / "2026-08-23" / "09.md").exists())
-
-    def test_a_due_retry_is_attempted_before_the_current_hour(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            raw = journal / "raw"
-            raw.mkdir(parents=True)
-            (raw / "activity-2026-08-23.jsonl").write_text(
-                "\n".join(json.dumps({"source": "foreground-window", "process": "Code", "localTimestamp": f"2026-08-23T{h:02d}:15:00+03:30", "active": True}) for h in (8, 9)) + "\n",
-                encoding="utf-8",
-            )
-            config_path = self._config(root, "hourly")
-            from src.infra.processing_queue import FileJobQueue
-            queue = FileJobQueue(journal / "queue-period")
-            queue.enqueue("hourly", {"date": "2026-08-23", "hour": 8}, job_id="hourly-2026-08-23-08")
-            fixed_now = dt.datetime(2026, 8, 23, 9, 30, 0)
-            canned = json.dumps({"summary": "ok", "confidence": 0.5})
-            with mock.patch("src.analysis.synthesize_period.dt") as mocked_dt:
-                mocked_dt.datetime.now.return_value = fixed_now
-                mocked_dt.date.today.return_value = fixed_now.date()
-                mocked_dt.date.fromisoformat = dt.date.fromisoformat
-                mocked_dt.datetime.fromisoformat = dt.datetime.fromisoformat
-                mocked_dt.timedelta = dt.timedelta
-                with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=canned) as mocked:
-                    exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
-
-            self.assertEqual(exit_code, 0)
+            self.assertEqual((first, second), (0, 0))
             self.assertEqual(mocked.call_count, 2)
-            self.assertTrue((journal / "hourly" / "2026-08-23" / "08.md").exists())
-            self.assertTrue((journal / "hourly" / "2026-08-23" / "09.md").exists())
+            self.assertTrue((journal / "hourly" / DATE / "09.md").exists())
+            self.assertTrue((journal / "hourly" / DATE / "14.md").exists())
 
-    def test_disabled_stage_writes_nothing_and_never_calls_the_model(self):
+    def test_disabled_stage_does_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            _screen(journal, DATE, 9, "09-05-16-374")
+            config_path = _config(journal, enabled=False)
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
+                exit_code = _run_main(journal, config_path, "hourly")
+
+            self.assertEqual(exit_code, 0)
+            mocked.assert_not_called()
+
+    def test_missing_provider_returns_one_and_writes_a_failed_heartbeat(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             journal = root / "journal"
             journal.mkdir()
             config_path = root / "settings.json"
-            config_path.write_text(json.dumps({"hourlySynthesis": {"enabled": False}}), encoding="utf-8")
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
-                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
+            config_path.write_text(json.dumps({"hourlySynthesis": {"enabled": True}}), encoding="utf-8")
 
-            self.assertEqual(exit_code, 0)
-            mocked.assert_not_called()
+            exit_code = _run_main(journal, config_path, "hourly")
 
-    def test_weekly_period_writes_to_the_weekly_path(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            journal.mkdir()
-            config_path = self._config(root, "weekly")
-            canned = json.dumps({"summary": "Weekly rollup.", "confidence": 0.6})
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=canned):
-                exit_code = self._run(journal, config_path, "weekly", "2026-08-27")
-
-            year, week, _ = week_dates("2026-08-27")
-            self.assertEqual(exit_code, 0)
-            self.assertTrue((journal / "weekly" / f"{year}-W{week:02d}.md").exists())
-
-    def test_missing_config_file_returns_zero_and_does_not_raise(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            journal.mkdir()
-            config_path = root / "does-not-exist.json"
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
-                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
-
-            self.assertEqual(exit_code, 0)
-            mocked.assert_not_called()
-
-    def test_malformed_config_json_returns_zero_and_does_not_raise(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            journal.mkdir()
-            config_path = root / "settings.json"
-            config_path.write_text("not valid json {", encoding="utf-8")
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
-                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
-
-            self.assertEqual(exit_code, 0)
-            mocked.assert_not_called()
-
-    def test_weekly_synthesis_is_not_frozen_by_a_prior_days_completed_retry(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            journal.mkdir()
-            config_path = self._config(root, "weekly")
-            monday = "2026-08-24"
-            tuesday = "2026-08-25"
-            thursday = "2026-08-27"
-
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
-                exit_code = self._run(journal, config_path, "weekly", monday)
-            self.assertEqual(exit_code, 0)
-
-            recovered = json.dumps({"summary": "Recovered on Tuesday.", "confidence": 0.5})
-            with mock.patch(
-                "src.analysis.synthesize_period.call_chat_completions",
-                side_effect=[recovered, recovered],
-            ):
-                exit_code = self._run(journal, config_path, "weekly", tuesday)
-            self.assertEqual(exit_code, 0)
-
-            year, week, _ = week_dates(monday)
-            weekly_path = journal / "weekly" / f"{year}-W{week:02d}.md"
-            self.assertTrue(weekly_path.exists())
-
-            fresh = json.dumps({"summary": "Thursday brings fresh evidence.", "confidence": 0.6})
-            with mock.patch(
-                "src.analysis.synthesize_period.call_chat_completions",
-                return_value=fresh,
-            ) as mocked:
-                exit_code = self._run(journal, config_path, "weekly", thursday)
-
-            self.assertEqual(exit_code, 0)
-            mocked.assert_called()
-            self.assertIn("Thursday brings fresh evidence.", weekly_path.read_text(encoding="utf-8"))
-
-    def test_weekly_synthesis_resumes_after_dead_letter_on_a_later_day(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            journal.mkdir()
-            config_path = root / "settings.json"
-            config_path.write_text(json.dumps({
-                "weeklySynthesis": {"enabled": True, "activeProvider": "test-provider", "maxAttempts": 1, "retryDelaySeconds": 60},
-                "providers": {"test-provider": {"endpoint": "http://x", "model": "m"}},
-            }), encoding="utf-8")
-            monday = "2026-08-24"
-            tuesday = "2026-08-25"
-            thursday = "2026-08-27"
-
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
-                exit_code = self._run(journal, config_path, "weekly", monday)
-            self.assertEqual(exit_code, 0)
-
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="not json"):
-                exit_code = self._run(journal, config_path, "weekly", tuesday)
-            self.assertEqual(exit_code, 0)
-
-            dead_lettered = list((journal / "queue-period" / "failed").glob("*.json"))
-            self.assertTrue(dead_lettered, "expected a dead-lettered weekly job by Tuesday")
-
-            recovered = json.dumps({"summary": "Back on track Thursday.", "confidence": 0.7})
-            with mock.patch(
-                "src.analysis.synthesize_period.call_chat_completions",
-                return_value=recovered,
-            ) as mocked:
-                exit_code = self._run(journal, config_path, "weekly", thursday)
-
-            self.assertEqual(exit_code, 0)
-            mocked.assert_called()
-            year, week, _ = week_dates(monday)
-            weekly_path = journal / "weekly" / f"{year}-W{week:02d}.md"
-            self.assertTrue(weekly_path.exists())
-            self.assertIn("Back on track Thursday.", weekly_path.read_text(encoding="utf-8"))
-
-    def test_provider_missing_endpoint_returns_zero_and_writes_failed_heartbeat(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            journal = root / "journal"
-            journal.mkdir()
-            config_path = root / "settings.json"
-            config_path.write_text(json.dumps({
-                "hourlySynthesis": {"enabled": True, "activeProvider": "test-provider", "maxAttempts": 5, "retryDelaySeconds": 60},
-                "providers": {"test-provider": {"model": "m"}},
-            }), encoding="utf-8")
-            with mock.patch("src.analysis.synthesize_period.call_chat_completions") as mocked:
-                exit_code = self._run(journal, config_path, "hourly", "2026-08-23")
-
-            self.assertEqual(exit_code, 0)
-            mocked.assert_not_called()
-            heartbeat_path = journal / "health" / "hourly-synthesis.json"
-            self.assertTrue(heartbeat_path.exists())
-            heartbeat = json.loads(heartbeat_path.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 1)
+            heartbeat = json.loads((journal / "health" / "hourly-synthesis.json").read_text(encoding="utf-8"))
             self.assertEqual(heartbeat["status"], "failed")
-            self.assertTrue(heartbeat.get("lastError"))
+
+    def test_model_failure_returns_one_and_a_later_run_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            _screen(journal, DATE, 9, "09-05-16-374")
+            config_path = _config(journal)
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value="nope"):
+                failed = _run_main(journal, config_path, "hourly")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED):
+                recovered = _run_main(journal, config_path, "hourly")
+
+            self.assertEqual((failed, recovered), (1, 0))
+            self.assertTrue((journal / "hourly" / DATE / "09.md").exists())
+
+    def test_malformed_provider_payload_fails_the_report_and_still_writes_the_heartbeat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            journal.mkdir()
+            _screen(journal, DATE, 9, "09-05-16-374")
+            config_path = _config(journal)
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", side_effect=IndexError("list index out of range")):
+                exit_code = _run_main(journal, config_path, "hourly")
+
+            self.assertEqual(exit_code, 1)
+            heartbeat = json.loads((journal / "health" / "hourly-synthesis.json").read_text(encoding="utf-8"))
+            self.assertEqual(heartbeat["status"], "failed")
+
+    def test_daily_period_uses_the_journal_synthesis_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = root / "journal"
+            (journal / "hourly" / DATE).mkdir(parents=True)
+            (journal / "hourly" / DATE / "10.md").write_text("# Hourly\n\nKibana hour.\n", encoding="utf-8")
+            config_path = _config(journal, stage="journalSynthesis")
+            with mock.patch("src.analysis.synthesize_period.call_chat_completions", return_value=CANNED):
+                exit_code = _run_main(journal, config_path, "daily")
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn(NARRATIVE_MARKER, (journal / "daily" / f"{DATE}.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
