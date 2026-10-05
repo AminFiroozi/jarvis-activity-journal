@@ -83,11 +83,23 @@ def keep_existing_narrative(scaffold: str, existing: str) -> str:
     return scaffold.rstrip() + "\n\n" + existing[existing.index(NARRATIVE_MARKER):]
 
 
-def run_period(args, period: str) -> int:
+def run_period(args, period: str, date: str | None = None) -> int:
     return subprocess.run(
-        [sys.executable, "-m", "src.analysis.synthesize_period", "--journal-root", str(args.journal_root), "--config", str(args.config), "--period", period, "--date", args.date],
+        [
+            sys.executable, "-m", "src.analysis.synthesize_period",
+            "--journal-root", str(args.journal_root), "--config", str(args.config),
+            "--period", period, "--date", date or args.date,
+        ],
         cwd=pathlib.Path(__file__).parents[2],
     ).returncode
+
+
+def catch_up_dates(date: str, days: int) -> list[str]:
+    """The given date plus the `days` calendar days before it, oldest last."""
+    if days <= 0:
+        return [date]
+    parsed = dt.date.fromisoformat(date)
+    return [(parsed - dt.timedelta(days=offset)).isoformat() for offset in range(days, -1, -1)]
 
 
 def main() -> int:
@@ -95,11 +107,21 @@ def main() -> int:
     parser.add_argument("--journal-root", required=True, type=pathlib.Path)
     parser.add_argument("--config", required=True, type=pathlib.Path)
     parser.add_argument("--date", default=dt.date.today().isoformat())
+    parser.add_argument(
+        "--catch-up-days",
+        type=int,
+        default=1,
+        help="Also rebuild this many previous days (default 1); 0 disables catch-up.",
+    )
     args = parser.parse_args()
 
     subprocess.run([sys.executable, "-m", "src.infra.retention", "--journal-root", str(args.journal_root), "--config", str(args.config)], cwd=pathlib.Path(__file__).parents[2])
     subprocess.run([sys.executable, "-m", "src.analysis.analyze_screenshots", "--journal-root", str(args.journal_root), "--config", str(args.config), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
-    run_period(args, "hourly")
+    # Yesterday's last hour still gains screenshots after midnight, and their vision results are
+    # filed under the day they belong to, so yesterday is rebuilt too. The input stamp makes an
+    # unchanged report a no-op, so this only reaches the model for hours that really changed.
+    for date in catch_up_dates(args.date, args.catch_up_days):
+        run_period(args, "hourly", date)
 
     daily_path = args.journal_root / "daily" / f"{args.date}.md"
     daily_path.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +131,11 @@ def main() -> int:
     subprocess.run([sys.executable, "-m", "src.analysis.build_llm_context", "--journal-root", str(args.journal_root), "--date", args.date], cwd=pathlib.Path(__file__).parents[2])
     daily_code = run_period(args, "daily")
     run_period(args, "weekly")
+    for date in catch_up_dates(args.date, args.catch_up_days):
+        if date == args.date:
+            continue
+        run_period(args, "daily", date)
+        run_period(args, "weekly", date)
 
     try:
         config = json.loads(args.config.read_text(encoding="utf-8"))

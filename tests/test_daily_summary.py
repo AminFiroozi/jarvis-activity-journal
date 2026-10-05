@@ -132,7 +132,8 @@ class DailySummaryChainTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             commands = [call.args[0] for call in mock_run.call_args_list]
             periods = [command[command.index("--period") + 1] for command in commands if "src.analysis.synthesize_period" in command]
-            self.assertEqual(periods, ["hourly", "daily", "weekly"])
+            # Yesterday is caught up first, then the named date; each runs the chain in order.
+            self.assertEqual(periods, ["hourly", "hourly", "daily", "weekly", "daily", "weekly"])
             self.assertFalse(any("src.analysis.synthesize_journal" in command for command in commands))
 
 
