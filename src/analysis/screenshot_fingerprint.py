@@ -31,13 +31,38 @@ def hamming_distance(first: str, second: str) -> int:
     return sum(left != right for left, right in zip(first, second))
 
 
-def deduplicate_with_matches(images: list[Path], threshold: int = 4) -> tuple[list[Path], dict[Path, Path]]:
+def deduplicate_with_matches(
+    images: list[Path],
+    threshold: int = 4,
+    against: list[Path] | None = None,
+) -> tuple[list[Path], dict[Path, Path]]:
+    """Keep one image per visually distinct screen.
+
+    `against` holds images from earlier runs (typically the ones already analysed). Comparing
+    candidates against them is what stops an unchanged screen costing another vision call: without
+    it each run only sees its own candidates and re-analyses the same screen every time.
+    """
     selected: list[Path] = []
     fingerprints: list[Fingerprint] = []
     matches: dict[Path, Path] = {}
+
+    earlier: list[tuple[Path, Fingerprint]] = [(path, fingerprint_image(path)) for path in (against or [])]
+
     for image in images:
         current = fingerprint_image(image)
-        matched = next(
+        matched_previous = next(
+            (
+                path
+                for path, previous in earlier
+                if current.sha256 == previous.sha256
+                or hamming_distance(current.perceptual_hash, previous.perceptual_hash) <= threshold
+            ),
+            None,
+        )
+        if matched_previous is not None:
+            matches[image] = matched_previous
+            continue
+        matched_index = next(
             (
                 index
                 for index, previous in enumerate(fingerprints)
@@ -46,11 +71,12 @@ def deduplicate_with_matches(images: list[Path], threshold: int = 4) -> tuple[li
             ),
             None,
         )
-        if matched is not None:
-            matches[image] = selected[matched]
+        if matched_index is not None:
+            matches[image] = selected[matched_index]
             continue
         selected.append(image)
         fingerprints.append(current)
+        earlier.append((image, current))
     return selected, matches
 
 

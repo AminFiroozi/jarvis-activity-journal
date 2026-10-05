@@ -49,5 +49,48 @@ class ScreenshotFingerprintTests(unittest.TestCase):
             self.assertEqual(matches, {duplicate: first})
 
 
+class CrossRunDedupeTests(unittest.TestCase):
+    """Screens are captured every minute but analysed in later runs, so a run must compare its
+    candidates against what was already analysed -- otherwise an unchanged screen costs a vision
+    call every single run and the queue can never drain."""
+
+    def _image(self, directory: Path, name: str, text: str) -> Path:
+        path = Path(directory) / name
+        image = Image.new("RGB", (64, 64), color="white")
+        ImageDraw.Draw(image).text((5, 5), text, fill="black")
+        image.save(path, "PNG")
+        return path
+
+    def test_candidate_matching_an_already_analysed_image_is_deduplicated_against_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous = self._image(directory, "previous.png", "same")
+            candidate = self._image(directory, "candidate.png", "same")
+
+            kept, matches = deduplicate_with_matches([candidate], threshold=4, against=[previous])
+
+            self.assertEqual(kept, [])
+            self.assertEqual(matches[candidate], previous)
+
+    def test_meaningful_change_against_previous_is_still_analysed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            previous = self._image(directory, "previous.png", "a")
+            candidate = self._image(directory, "candidate.png", "completely different content here")
+
+            kept, matches = deduplicate_with_matches([candidate], threshold=0, against=[previous])
+
+            self.assertEqual(kept, [candidate])
+            self.assertEqual(matches, {})
+
+    def test_candidates_are_still_deduplicated_among_themselves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first = self._image(directory, "first.png", "same")
+            second = self._image(directory, "second.png", "same")
+
+            kept, matches = deduplicate_with_matches([first, second], threshold=4)
+
+            self.assertEqual(kept, [first])
+            self.assertEqual(matches[second], first)
+
+
 if __name__ == "__main__":
     unittest.main()

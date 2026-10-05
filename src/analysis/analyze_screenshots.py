@@ -196,7 +196,14 @@ def main() -> int:
             continue  # retried on the next run
     reconcile_duplicates(journal, args.date, {})
     candidates = [image for image in all_images if str(image) not in analyzed and not screen_path(journal, image).exists()]
-    candidates, duplicates = deduplicate_with_matches(candidates, threshold=max(0, int(screenshot_config.get("dedupeHammingThreshold", 4))))
+    # Compare against what was already analysed, not just this batch: an unchanged screen would
+    # otherwise be re-analysed by every run and the queue could never drain.
+    already_analysed = [pathlib.Path(path) for path in analyzed if pathlib.Path(path).exists()]
+    candidates, duplicates = deduplicate_with_matches(
+        candidates,
+        threshold=max(0, int(screenshot_config.get("dedupeHammingThreshold", 4))),
+        against=already_analysed,
+    )
     reconcile_duplicates(journal, args.date, duplicates)
 
     queue = FileJobQueue(journal / "queue")
