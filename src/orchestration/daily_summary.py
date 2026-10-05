@@ -70,8 +70,9 @@ def render_daily_scaffold(journal_root: pathlib.Path, date: str) -> str:
         "",
         "## Limitations",
         "",
-        "- No screenshots, audio, webcam, keystrokes, clipboard, browser contents, document contents, or diffs are included.",
+        "- Screen contents come from vision analysis of captured screenshots; audio, webcam, keystrokes and clipboard are never captured, and document contents are only described when visible on screen.",
         "- Application time is estimated from sampling frequency and excludes detected idle samples.",
+        "- A screenshot's analysis reflects what was visible at that moment; near-duplicate captures are recorded once and later ones are marked unchanged.",
     ])
     return "\n".join(lines) + "\n"
 
