@@ -10,6 +10,7 @@ import datetime as dt
 import hashlib
 import json
 import pathlib
+import time
 
 from src.providers.model_client import ProviderError, call_chat_completions, resolve_provider
 from src.analysis.ocr import extract_text
@@ -222,6 +223,9 @@ def main() -> int:
         return 1
     prompts = load_prompts(args.prompts)
     max_attempts = int(analyzer_config.get("maxAttempts", 5))
+    # A run killed by systemd's TimeoutStartSec loses its in-flight job to the processing folder and
+    # its completed work never reaches the report files, so stop claiming before the deadline.
+    run_deadline = time.monotonic() + float(analyzer_config.get("runDeadlineSeconds", 1500))
     retry_delay_seconds = int(analyzer_config.get("retryDelaySeconds", 60))
 
     results = []
@@ -229,6 +233,8 @@ def main() -> int:
     processed = 0
     attempted_this_run: set[str] = set()
     while processed < max_per_run:
+        if time.monotonic() >= run_deadline:
+            break
         job = queue.claim(kind="vision", exclude_ids=attempted_this_run)
         if job is None:
             break

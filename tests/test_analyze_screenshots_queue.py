@@ -233,5 +233,33 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
             self.assertEqual(job["attempts"], 1)
 
 
+class RunDeadlineTests(unittest.TestCase):
+    def test_run_stops_claiming_work_once_the_deadline_has_passed(self):
+        """A run killed by systemd's TimeoutStartSec strands its in-flight job, so it must
+        stop claiming new screenshots while there is still time to finish the current one."""
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            config = json.loads((journal / "config" / "settings.json").read_text())
+            config["screenshotAnalyzer"]["runDeadlineSeconds"] = 0
+            (journal / "config" / "settings.json").write_text(json.dumps(config), encoding="utf-8")
+
+            with mock.patch.object(module, "call_vision", return_value={"summary": "s", "observations": []}) as vision:
+                _run(journal)
+
+            self.assertEqual(vision.call_count, 0)
+
+    def test_work_within_the_deadline_is_still_claimed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            config = json.loads((journal / "config" / "settings.json").read_text())
+            config["screenshotAnalyzer"]["runDeadlineSeconds"] = 600
+            (journal / "config" / "settings.json").write_text(json.dumps(config), encoding="utf-8")
+
+            with mock.patch.object(module, "call_vision", return_value={"summary": "s", "observations": []}) as vision:
+                _run(journal)
+
+            self.assertEqual(vision.call_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
