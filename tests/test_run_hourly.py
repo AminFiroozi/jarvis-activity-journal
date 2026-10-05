@@ -56,8 +56,13 @@ class RunHourlyWiringTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             period_calls = self._calls_containing(mock_run, "src.analysis.synthesize_period")
-            periods = [call.args[0][call.args[0].index("--period") + 1] for call in period_calls]
-            self.assertEqual(periods, ["hourly", "daily", "weekly"])
+            by_date: dict[str, list[str]] = {}
+            for call in period_calls:
+                argv = call.args[0]
+                by_date.setdefault(argv[argv.index("--date") + 1], []).append(argv[argv.index("--period") + 1])
+            # Each visited date runs the whole chain in order; catch-up adds yesterday as a second date.
+            for periods in by_date.values():
+                self.assertEqual(periods, ["hourly", "daily", "weekly"])
             self.assertEqual(len(self._calls_containing(mock_run, "src.analysis.synthesize_journal")), 0)
 
 
