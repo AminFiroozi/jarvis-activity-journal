@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import time
@@ -72,6 +73,66 @@ class RetentionTests(unittest.TestCase):
             self.assertFalse(old_failed.exists())
             self.assertTrue(new_pending.exists())
             self.assertEqual(result["removedFiles"], 2)
+
+
+class RetentionKeepsQueuedScreenshotsTests(unittest.TestCase):
+    """A screenshot waits in queue/pending for days before it is analysed, and retention prunes
+    screenshots/ purely by file mtime. Deleting a file that still has queued work creates a job
+    that can never succeed -- which is how the live queue filled with dead September jobs."""
+
+    def _age(self, path: Path, days: int) -> None:
+        stamp = time.time() - (days * 86400)
+        os.utime(path, (stamp, stamp))
+
+    def test_screenshot_with_a_pending_job_is_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            screenshot = root / "screenshots" / "2026-01-01" / "screen-00-00-00-000.jpg"
+            screenshot.parent.mkdir(parents=True)
+            screenshot.write_bytes(b"jpeg")
+            pending = root / "queue" / "pending"
+            pending.mkdir(parents=True)
+            (pending / "job.json").write_text(
+                json.dumps({"id": "job", "kind": "vision", "payload": {"screenshot": str(screenshot)}}),
+                encoding="utf-8",
+            )
+            self._age(screenshot, 200)
+
+            result = run_retention(root, retention_days=90)
+
+            self.assertTrue(screenshot.exists())
+            self.assertEqual(result["keptQueued"], 1)
+
+    def test_aged_screenshot_without_a_pending_job_is_still_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            screenshot = root / "screenshots" / "2026-01-01" / "screen-00-00-00-000.jpg"
+            screenshot.parent.mkdir(parents=True)
+            screenshot.write_bytes(b"jpeg")
+            self._age(screenshot, 200)
+
+            result = run_retention(root, retention_days=90)
+
+            self.assertFalse(screenshot.exists())
+            self.assertEqual(result["removedFiles"], 1)
+
+    def test_a_screenshot_pending_under_a_different_kind_is_still_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            screenshot = root / "screenshots" / "2026-01-01" / "screen-00-00-00-000.jpg"
+            screenshot.parent.mkdir(parents=True)
+            screenshot.write_bytes(b"jpeg")
+            pending = root / "queue" / "pending"
+            pending.mkdir(parents=True)
+            (pending / "job.json").write_text(
+                json.dumps({"id": "job", "kind": "hourly", "payload": {"screenshot": str(screenshot)}}),
+                encoding="utf-8",
+            )
+            self._age(screenshot, 200)
+
+            run_retention(root, retention_days=90)
+
+            self.assertFalse(screenshot.exists())
 
 
 if __name__ == "__main__":

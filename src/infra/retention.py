@@ -20,21 +20,55 @@ _PRUNED_SUBDIRECTORIES = (
 )
 
 
+def _queued_screenshots(journal_root: pathlib.Path) -> set[pathlib.Path]:
+    """Screenshots that a live queue job still needs.
+
+    A screenshot is created at capture time and analysed much later, so its job can sit in
+    `pending` for days. Retention prunes by file mtime alone, which would happily delete a file
+    whose analysis is still scheduled -- the job then fails forever and burns attempts on a file
+    that no longer exists. Anything referenced by a pending or in-flight vision job is therefore
+    off limits until the job has run.
+    """
+    queued: set[pathlib.Path] = set()
+    for state in ("pending", "processing"):
+        directory = journal_root / "queue" / state
+        if not directory.is_dir():
+            continue
+        for path in directory.glob("*.json"):
+            try:
+                job = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if not isinstance(job, dict) or job.get("kind") != "vision":
+                continue
+            screenshot = (job.get("payload") or {}).get("screenshot")
+            if screenshot:
+                queued.add(pathlib.Path(screenshot))
+    return queued
+
+
 def run_retention(journal_root: pathlib.Path, retention_days: int) -> dict:
     cutoff = dt.datetime.now() - dt.timedelta(days=retention_days)
+    queued = _queued_screenshots(journal_root)
     removed = 0
+    kept_queued = 0
     for relative in _PRUNED_SUBDIRECTORIES:
         target = journal_root / relative
         if not target.exists():
             continue
         for path in target.rglob("*"):
-            if path.is_file() and dt.datetime.fromtimestamp(path.stat().st_mtime) < cutoff:
-                path.unlink()
-                removed += 1
+            if not path.is_file() or dt.datetime.fromtimestamp(path.stat().st_mtime) >= cutoff:
+                continue
+            if path in queued:
+                kept_queued += 1
+                continue
+            path.unlink()
+            removed += 1
     return {
         "retentionDays": retention_days,
         "cutoff": cutoff.astimezone(dt.timezone.utc).isoformat(),
         "removedFiles": removed,
+        "keptQueued": kept_queued,
     }
 
 
