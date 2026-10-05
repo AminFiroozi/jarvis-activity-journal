@@ -230,7 +230,9 @@ class AnalyzeScreenshotsQueueTests(unittest.TestCase):
 
             state, job = queue.find("gone")
             self.assertEqual(state, "failed")
-            self.assertEqual(job["attempts"], 1)
+            # Swept before it was ever claimed, so no attempt was spent on a file that cannot exist.
+            self.assertEqual(job["attempts"], 0)
+            self.assertEqual(job["lastError"], "screenshot file deleted by retention")
 
 
 class RunDeadlineTests(unittest.TestCase):
@@ -259,6 +261,28 @@ class RunDeadlineTests(unittest.TestCase):
                 _run(journal)
 
             self.assertEqual(vision.call_count, 1)
+
+
+class StalePendingSweepTests(unittest.TestCase):
+    def test_pending_jobs_whose_screenshot_retention_deleted_are_dead_lettered_up_front(self):
+        """Retention deletes old screenshot files while their queue jobs are still pending.
+        Claiming them wastes the run's whole deadline on impossible work."""
+        with tempfile.TemporaryDirectory() as directory:
+            journal = _make_journal(Path(directory))
+            from src.infra.processing_queue import FileJobQueue
+
+            queue = FileJobQueue(journal / "queue")
+            queue.enqueue("vision", {"screenshot": "/nonexistent/deleted.jpg", "date": "2026-01-01"}, job_id="gone")
+            real = journal / "screenshots" / "2026-01-01" / "screen-00-00-00-000.jpg"
+            queue.enqueue("vision", {"screenshot": str(real), "date": "2026-01-01"}, job_id="present")
+
+            with mock.patch.object(module, "call_vision", return_value={"summary": "s", "observations": []}) as vision:
+                _run(journal)
+
+            self.assertEqual(queue.find("gone")[0], "failed")
+            self.assertEqual(queue.find("present")[0], "completed")
+            # No model call was wasted on the deleted screenshot.
+            self.assertGreaterEqual(vision.call_count, 1)
 
 
 if __name__ == "__main__":

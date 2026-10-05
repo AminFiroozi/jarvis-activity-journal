@@ -205,6 +205,14 @@ def main() -> int:
         older_than_seconds=max(60, int(analyzer_config.get("reclaimStaleAfterSeconds", 1800))),
         kind="vision",
     )
+    # Retention deletes old screenshot files while their jobs are still queued. Those jobs can
+    # never succeed, and because the queue is claimed oldest-first they would otherwise fill the
+    # run's whole deadline with impossible work, starving the current day's screenshots.
+    def _screenshot_deleted(job: dict) -> bool:
+        shot = job.get("payload", {}).get("screenshot")
+        return bool(shot) and not pathlib.Path(shot).exists()
+
+    dead_lettered = queue.dead_letter_pending(_screenshot_deleted, "screenshot file deleted by retention", kind="vision")
     window_events = load_window_events(journal, args.date)
     for image in candidates:
         context = nearest_context(window_events, image.stat().st_mtime, args.context)
