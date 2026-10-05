@@ -128,5 +128,47 @@ class ProcessingQueueTests(unittest.TestCase):
             self.assertEqual(queue.find("other-kind")[0], "pending")
 
 
+    def test_reclaim_stale_processing_jobs_returns_them_to_pending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = FileJobQueue(Path(directory))
+            queue.enqueue("vision", {"screenshot": "a.jpg"}, job_id="stranded")
+            claimed = queue.claim(kind="vision")
+            self.assertEqual(claimed["id"], "stranded")
+
+            moved = queue.reclaim_stale_processing(older_than_seconds=0)
+
+            self.assertEqual(moved, 1)
+            state, job = queue.find("stranded")
+            self.assertEqual(state, "pending")
+            self.assertEqual(job["status"], "pending")
+            # The attempt it already consumed is kept, so a repeatedly crashing job still dead-letters.
+            self.assertEqual(job["attempts"], 1)
+
+    def test_reclaim_leaves_recent_processing_jobs_alone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = FileJobQueue(Path(directory))
+            queue.enqueue("vision", {"screenshot": "a.jpg"}, job_id="busy")
+            queue.claim(kind="vision")
+
+            moved = queue.reclaim_stale_processing(older_than_seconds=3600)
+
+            self.assertEqual(moved, 0)
+            self.assertEqual(queue.find("busy")[0], "processing")
+
+    def test_reclaim_honours_the_kind_filter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            queue = FileJobQueue(Path(directory))
+            queue.enqueue("vision", {}, job_id="vision-job")
+            queue.enqueue("hourly", {}, job_id="other-job")
+            queue.claim(kind="vision")
+            queue.claim(kind="hourly")
+
+            moved = queue.reclaim_stale_processing(older_than_seconds=0, kind="vision")
+
+            self.assertEqual(moved, 1)
+            self.assertEqual(queue.find("vision-job")[0], "pending")
+            self.assertEqual(queue.find("other-job")[0], "processing")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,6 +112,34 @@ class FileJobQueue:
         self._write("pending", job)
         return job
 
+    def reclaim_stale_processing(self, older_than_seconds: int = 3600, kind: str | None = None) -> int:
+        """Return jobs stranded in 'processing' to 'pending'.
+
+        A worker killed mid-job leaves its job behind: claim() only reads 'pending', so nothing
+        would ever move it again and the screenshot would never be analysed. Jobs older than the
+        threshold had no worker left holding them. The attempt count is kept, so a job that keeps
+        crashing still reaches the dead-letter state instead of retrying forever.
+        """
+        cutoff = _now() - dt.timedelta(seconds=older_than_seconds)
+        moved = 0
+        for path in sorted((self.root / "processing").glob("*.json")):
+            job = json.loads(path.read_text(encoding="utf-8"))
+            if kind is not None and job.get("kind") != kind:
+                continue
+            claimed_at = job.get("processingAt")
+            try:
+                claimed = dt.datetime.fromisoformat(claimed_at) if claimed_at else None
+            except ValueError:
+                claimed = None
+            if claimed is not None and claimed > cutoff:
+                continue
+            job.update({"status": "pending", "availableAt": _timestamp(_now())})
+            job.pop("processingAt", None)
+            path.unlink()
+            self._write("pending", job)
+            moved += 1
+        return moved
+
     def requeue_failed(self, kind: str | None = None, should_requeue: Callable[[dict[str, Any]], bool] | None = None) -> int:
         moved = 0
         for path in sorted((self.root / "failed").glob("*.json")):

@@ -199,6 +199,11 @@ def main() -> int:
     reconcile_duplicates(journal, args.date, duplicates)
 
     queue = FileJobQueue(journal / "queue")
+    # Jobs left in 'processing' by a killed worker would never be picked up again, so return them.
+    reclaimed = queue.reclaim_stale_processing(
+        older_than_seconds=max(60, int(analyzer_config.get("reclaimStaleAfterSeconds", 1800))),
+        kind="vision",
+    )
     window_events = load_window_events(journal, args.date)
     for image in candidates:
         context = nearest_context(window_events, image.stat().st_mtime, args.context)
