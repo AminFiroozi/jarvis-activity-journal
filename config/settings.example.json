@@ -104,9 +104,11 @@
     "enabled": false,
     "activeProvider": "local-vision",
     "intervalSeconds": 900,
-    "maxScreenshotsPerRun": 12,
+    "maxScreenshotsPerRun": 40,
     "maxAttempts": 5,
-    "retryDelaySeconds": 60
+    "retryDelaySeconds": 60,
+    "runDeadlineSeconds": 2250,
+    "reclaimStaleAfterSeconds": 1800
   },
   "journalSynthesis": {
     "enabled": true,
